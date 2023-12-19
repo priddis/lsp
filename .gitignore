@@ -1,0 +1,5 @@
+tree-sitter-java
+zig-cache
+zig-out
+err.log
+src/testcode
