@@ -1,5 +1,6 @@
 const std = @import("std");
 const handler = @import("request_handler.zig");
+const logger = @import("log.zig");
 
 pub fn main() void {
     while (true) {
@@ -10,3 +11,32 @@ pub fn main() void {
     }
 }
 
+pub fn panic(msg: []const u8, trace_opt: ?*std.builtin.StackTrace, addr: ?usize) noreturn {
+    @setCold(true);
+    if (trace_opt) |trace| {
+        logger.log("\n{s} \n{any}\n", .{ msg, trace });
+        const debug_info = std.debug.getSelfDebugInfo() catch {
+            logger.log("no debug info\n", .{});
+            unreachable;
+        };
+        const file: std.fs.File = logger.file.?;
+        const stream = file.writer();
+        std.debug.writeStackTrace(trace.*, stream, std.heap.page_allocator, debug_info, .no_color) catch {
+            logger.log("error writing stack trace", .{});
+            unreachable;
+        };
+    } else {
+        logger.log("no stack trace {s}\n", .{msg});
+        const debug_info = std.debug.getSelfDebugInfo() catch {
+            logger.log("no debug info\n", .{});
+            unreachable;
+        };
+        const file: std.fs.File = logger.file.?;
+        const stream = file.writer();
+        std.debug.writeCurrentStackTrace(stream, debug_info, .no_color, addr) catch {
+            logger.log("error writing current stack trace", .{});
+            unreachable;
+        };
+    }
+    std.os.abort();
+}

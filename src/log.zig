@@ -1,10 +1,10 @@
 const std = @import("std");
-const UnerecoverableError = @import("errors.zig").UnrecoverableError;
+const UnrecoverableError = @import("errors.zig").UnrecoverableError;
+const IndexingError = @import("errors.zig").IndexingError;
 
+pub var file: ?std.fs.File = null;
 
-var file: ?std.fs.File = null;
-
-pub fn err(comptime msg: []const u8, args: anytype) void {
+pub fn log(comptime msg: []const u8, args: anytype) void {
     if (file == null) {
         file = std.fs.createFileAbsolute("/home/micah/code/lsp/err.log", .{ .truncate = true }) catch |er| blk: {
             std.log.err("unable to open file {!}", .{er});
@@ -18,7 +18,7 @@ pub fn err(comptime msg: []const u8, args: anytype) void {
     }
 }
 
-pub fn throw(comptime msg: []const u8, args: anytype, return_err: UnerecoverableError) UnerecoverableError {
-    err(msg, args);
-    return return_err;
+pub fn throw(comptime msg: []const u8, args: anytype, comptime e: anytype) @TypeOf(e) {
+    log(msg, args);
+    return e;
 }

@@ -1,71 +1,203 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const File = std.fs.File;
-
+const Logger = @import("log.zig");
+const IndexingError = @import("errors.zig").IndexingError;
 const c = @cImport({
     @cInclude("tree_sitter/api.h");
 });
-pub extern "c" fn tree_sitter_java() *c.TSLanguage;
+
+extern "c" fn tree_sitter_java() *c.TSLanguage;
 
 const Lookup = struct {
     row: u32 = 0,
-    column: u32 = 0
+    column: u32 = 0,
 };
 
-pub fn indexProject(project: []const u8) !void {
-    var index = std.StringHashMap(Lookup).init(std.heap.page_allocator);
-    defer index.deinit();
+const Range = struct {
+    start: usize = 0,
+    end: usize = 0,
+};
 
-    var it = try std.fs.openIterableDirAbsolute(project, .{ .access_sub_paths = true, .no_follow = true });
+const ClassTable = std.StringArrayHashMap(struct {
+    position: Lookup,
+    method_range: Range,
+    uri: []const u8,
+});
+
+const MethodTable = std.StringArrayHashMap(Lookup);
+
+pub const Tables = struct {
+    class_lookup: ClassTable,
+    method_lookup: MethodTable,
+
+    pub fn init(alloc: std.mem.Allocator) Tables {
+        return .{ .class_lookup = ClassTable.init(alloc), .method_lookup = MethodTable.init(alloc) };
+    }
+};
+
+const package_query_text = "(package_declaration (scoped_identifier) @name)";
+const classes_query_text = "(class_declaration name: (identifier) @name)";
+const methods_query_text = "(method_declaration name: (identifier) @name)";
+
+var package_query: *c.TSQuery = undefined;
+var class_query: *c.TSQuery = undefined;
+var method_query: *c.TSQuery = undefined;
+var parser: *c.TSParser = undefined;
+
+///Sets up parsers and queries
+pub fn init() void {
+    var error_type: c.TSQueryError = c.TSQueryErrorNone;
+    var err_offset: u32 = 0;
+    assert(error_type == c.TSQueryErrorNone);
+
+    package_query = c.ts_query_new(tree_sitter_java(), package_query_text, package_query_text.len, &err_offset, &error_type).?;
+    assert(error_type == c.TSQueryErrorNone);
+
+    class_query = c.ts_query_new(tree_sitter_java(), classes_query_text, classes_query_text.len, &err_offset, &error_type).?;
+    assert(error_type == c.TSQueryErrorNone);
+
+    method_query = c.ts_query_new(tree_sitter_java(), methods_query_text, methods_query_text.len, &err_offset, &error_type).?;
+    assert(error_type == c.TSQueryErrorNone);
+
+    parser = c.ts_parser_new().?;
+    _ = c.ts_parser_set_language(parser, tree_sitter_java());
+}
+
+pub fn indexProject(alloc: std.mem.Allocator, project: []const u8) IndexingError!Tables {
+    var class_lookup = ClassTable.init(alloc);
+    class_lookup = ClassTable.init(alloc);
+    var method_lookup = MethodTable.init(alloc);
+    method_lookup = MethodTable.init(alloc);
+
+    var it = try std.fs.openDirAbsolute(project, .{ .iterate = true, .access_sub_paths = true, .no_follow = true });
     defer it.close();
 
-    var walker = try it.walk(std.heap.page_allocator);
+    var walker = try it.walk(alloc);
     while (try walker.next()) |entry| {
         if (entry.basename.len > 5) {
-            const filetype: []const u8 = entry.basename[entry.basename.len - 5..];
+            const filetype: []const u8 = entry.basename[entry.basename.len - 5 ..];
             if (entry.kind == .file and std.mem.eql(u8, filetype, ".java")) {
-                const source_file: File = try entry.dir.openFile(entry.basename, .{});
-                //const class = try std.heap.page_allocator.dupe(u8, entry.basename);
-                try parseFile(source_file, &index);
+                const source_file: File = entry.dir.openFile(entry.basename, .{}) catch |err| switch (err) {
+                    error.FileTooBig => continue,
+                    error.AccessDenied => continue,
+                    error.NoSpaceLeft => unreachable, //Indexing takes no disk space
+                    error.SymLinkLoop => unreachable,
+                    error.IsDir => unreachable,
+                    error.Unexpected => unreachable,
+                    else => unreachable,
+                };
                 defer source_file.close();
+                var buf = [_]u8{0} ** 500000;
+                const length: u32 = @intCast(source_file.readAll(&buf) catch unreachable);
+                const text = buf[0..length :0];
+
+                const tree_opt = c.ts_parser_parse_string(parser, null, text, @intCast(text.len));
+                defer c.ts_tree_delete(tree_opt);
+
+                if (tree_opt) |tree| {
+                    const method_start = method_lookup.count();
+                    try collectMethods(alloc, &method_lookup, method_query, tree, text);
+                    const method_end = method_lookup.count();
+
+                    const package = try collectPackage(alloc, package_query, tree, text);
+
+                    const path_uri: []u8 = try std.mem.concat(alloc, u8, &.{ "file://", project, "/", entry.path });
+                    try collectClasses(alloc, &class_lookup, class_query, tree, text, path_uri, .{ .start = method_start, .end = method_end}, package);
+                } else {
+                    Logger.log("AST not found {s}\n", .{entry.path});
+                    unreachable;
+                }
             }
         }
     }
+    return .{ .class_lookup = class_lookup, .method_lookup = method_lookup };
 }
 
-pub fn parseFile(file: std.fs.File, index: *std.StringHashMap(Lookup)) !void {
-    const gpa = std.heap.page_allocator;
-    var buf = [_]u8{0} ** 500000;
-    const query = "(method_declaration name: (identifier) @name)";
-    const length: u32 = @intCast(try file.readAll(&buf));
-    const parser = c.ts_parser_new();
-    _ = c.ts_parser_set_language(parser, tree_sitter_java());
-    const tree = c.ts_parser_parse_string(parser, null, buf[0..length :0], length);
-    defer c.ts_tree_delete(tree);
-
-    var err_offset: u32 = 0;
-    var error_type: c.TSQueryError = c.TSQueryErrorNone;
-
+fn collectPackage(alloc: std.mem.Allocator, query: *c.TSQuery, tree: *c.TSTree, text: []const u8) ![]u8 {
     const root = c.ts_tree_root_node(tree);
-    const method_query = c.ts_query_new(tree_sitter_java(), query, query.len, &err_offset, &error_type);
 
-    assert(error_type == c.TSQueryErrorNone);
     const cursor = c.ts_query_cursor_new();
-    c.ts_query_cursor_exec(cursor, method_query, root);
+    c.ts_query_cursor_exec(cursor, query, root);
 
     var match: c.TSQueryMatch = undefined;
-    var matching = c.ts_query_cursor_next_match(cursor, &match);
-    while (matching) {
+    while (c.ts_query_cursor_next_match(cursor, &match)) {
         const captures: [*]const c.TSQueryCapture = match.captures;
-        for (0..match.capture_count) |i| {
-            const cur = captures[i];
-            const start = c.ts_node_start_byte(cur.node);
-            const end = c.ts_node_end_byte(cur.node);
-            const point = c.ts_node_start_point(cur.node);
-            const method: []u8 = try gpa.dupe(u8, buf[start..end]);
-            try index.put(method, Lookup{ .row = point.row, .column = point.column });
+        for (captures[0..match.capture_count]) |capture| {
+            const start = c.ts_node_start_byte(capture.node);
+            const end = c.ts_node_end_byte(capture.node);
+            return try alloc.dupe(u8, text[start..end]);
         }
-        matching = c.ts_query_cursor_next_match(cursor, &match);
+    }
+    return IndexingError.Unexpected;
+}
+
+fn collectMethods(alloc: std.mem.Allocator, _collect: *MethodTable, query: *c.TSQuery, tree: *c.TSTree, text: []const u8) !void {
+    var collect = _collect;
+    const root = c.ts_tree_root_node(tree);
+
+    const cursor = c.ts_query_cursor_new();
+    c.ts_query_cursor_exec(cursor, query, root);
+
+    var match: c.TSQueryMatch = undefined;
+    while (c.ts_query_cursor_next_match(cursor, &match)) {
+        const captures: [*]const c.TSQueryCapture = match.captures;
+        for (captures[0..match.capture_count]) |capture| {
+            const start = c.ts_node_start_byte(capture.node);
+            const end = c.ts_node_end_byte(capture.node);
+            const point = c.ts_node_start_point(capture.node);
+            const match_str: []u8 = try alloc.dupe(u8, text[start..end]);
+            try collect.put(match_str, .{ .row = point.row, .column = point.column });
+        }
     }
 }
-    
+
+fn collectClasses(alloc: std.mem.Allocator, _collect: *ClassTable, query: *c.TSQuery, tree: *c.TSTree, text: []const u8, uri: []const u8, method_range: Range, package: []const u8) !void {
+    var collect = _collect;
+    const root = c.ts_tree_root_node(tree);
+
+    const cursor = c.ts_query_cursor_new();
+    c.ts_query_cursor_exec(cursor, query, root);
+
+    var match: c.TSQueryMatch = undefined;
+    while (c.ts_query_cursor_next_match(cursor, &match)) {
+        const captures: [*]const c.TSQueryCapture = match.captures;
+        for (captures[0..match.capture_count]) |capture| {
+            const start = c.ts_node_start_byte(capture.node);
+            const end = c.ts_node_end_byte(capture.node);
+            const point = c.ts_node_start_point(capture.node);
+            const match_str: []u8 = try std.mem.concat(alloc, u8, &.{package, text[start..end]});
+            try collect.put(match_str, .{ .uri = uri, .position = .{ .row = point.row, .column = point.column }, .method_range = method_range});
+        }
+    }
+}
+
+const expectEqual = std.testing.expectEqual;
+test "test indexProject" {
+    init();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    const alloc = arena.allocator();
+    defer std.heap.ArenaAllocator.deinit(arena);
+    const tables = try indexProject(alloc, "/home/micah/code/lsp/src/testcode");
+
+    try expectEqual(@as(usize, 6), tables.class_lookup.count());
+    try expectEqual(@as(usize, 69), tables.method_lookup.count());
+}
+
+test "test collectMatches" {
+    init();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    const alloc = arena.allocator();
+    defer std.heap.ArenaAllocator.deinit(arena);
+
+    var cl = ClassTable.init(alloc);
+
+    const path_uri = "hello";
+    const text = @embedFile("testcode/App.java");
+    const tree_opt = c.ts_parser_parse_string(parser, null, text, @intCast(text.len));
+    const tree = tree_opt.?;
+    defer c.ts_tree_delete(tree_opt);
+    try collectClasses(alloc, &cl, class_query, tree, text, path_uri, .{.start = 0, .end = 0}, "package");
+    try std.testing.expectEqual(@as(usize, 1), cl.count());
+    try std.testing.expect(cl.contains("App"));
+}

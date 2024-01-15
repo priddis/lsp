@@ -3,10 +3,10 @@ const std = @import("std");
 pub const LspMethod = enum {
 
     //Lifecycle
-    @"initialize",
-    @"initialized",
-    @"shutdown",
-    @"exit",
+    initialize,
+    initialized,
+    shutdown,
+    exit,
 
     //TextDocument
     @"textDocument/didOpen",
@@ -31,7 +31,7 @@ pub fn LspResponse(comptime T: type) type {
         const Self = @This();
 
         pub fn build(_result: T, _id: u32) Self {
-            return Self{.result = _result, .id = _id};
+            return Self{ .result = _result, .id = _id };
         }
     };
 }
@@ -129,7 +129,7 @@ pub fn EnumCustomStringValues(comptime T: type, comptime contains_empty_enum: bo
             const KV = struct { []const u8, T };
             const fields = @typeInfo(T).Union.fields;
             var kvs_array: [fields.len - 1]KV = undefined;
-            inline for (fields[0 .. fields.len - 1], 0..) |field, i| {
+            for (fields[0 .. fields.len - 1], 0..) |field, i| {
                 kvs_array[i] = .{ field.name, @field(T, field.name) };
             }
             break :build_kvs kvs_array[0..];
