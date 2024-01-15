@@ -1,10 +1,9 @@
 const std = @import("std");
-const handler = @import("request_handler.zig");
 const logger = @import("log.zig");
+const handler = @import("request_handler.zig");
 
 pub fn main() void {
-    while (true) {
-        handler.recv() catch |err| {
+    while (true) { handler.recv() catch |err| {
             std.log.err("top level err {any}\n", .{err});
             return;
         };
@@ -20,9 +19,8 @@ pub fn panic(msg: []const u8, trace_opt: ?*std.builtin.StackTrace, addr: ?usize)
             unreachable;
         };
         const file: std.fs.File = logger.file.?;
-        const stream = file.writer();
-        std.debug.writeStackTrace(trace.*, stream, std.heap.page_allocator, debug_info, .no_color) catch {
-            logger.log("error writing stack trace", .{});
+        std.debug.writeStackTrace(trace.*, file.writer(), std.heap.page_allocator, debug_info, .no_color) catch {
+            logger.log("error writing stack trace\n", .{});
             unreachable;
         };
     } else {
@@ -32,11 +30,15 @@ pub fn panic(msg: []const u8, trace_opt: ?*std.builtin.StackTrace, addr: ?usize)
             unreachable;
         };
         const file: std.fs.File = logger.file.?;
-        const stream = file.writer();
-        std.debug.writeCurrentStackTrace(stream, debug_info, .no_color, addr) catch {
-            logger.log("error writing current stack trace", .{});
+        std.debug.writeCurrentStackTrace(file.writer(), debug_info, .no_color, addr) catch {
+            logger.log("error writing current stack trace\n", .{});
             unreachable;
         };
     }
     std.os.abort();
 }
+
+test {
+    std.testing.refAllDeclsRecursive(@This());
+}
+

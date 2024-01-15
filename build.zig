@@ -1,31 +1,42 @@
 const std = @import("std");
-const FileSource = std.Build.FileSource;
 
 // Although this function looks imperative, note that its job is to
 // declaratively construct a build graph that will be executed by an external
 // runner.
 pub fn build(b: *std.Build) void {
-    // Standard target options allows the person running `zig build` to choose
-    // what target to build for. Here we do not override the defaults, which
-    // means any target is allowed, and the default is native. Other options
-    // for restricting supported target set are available.
     const target = b.standardTargetOptions(.{});
-
-    // Standard optimization options allow the person running `zig build` to select
-    // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
-    // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
+
+    // Precompilation step to generate treesitter constants
+    const generate_consts = b.addExecutable(.{
+        .name = "generate_ts_constants",
+        .root_source_file = .{ .path = "tools/generate_ts_constants.zig" },
+        .target = b.host,
+    });
+    generate_consts.addObjectFile(std.Build.LazyPath.relative("lib/libtree-sitter.a"));
+    generate_consts.addObjectFile(std.Build.LazyPath.relative("lib/libtree-sitter-java.a"));
+    generate_consts.addIncludePath(std.Build.LazyPath.relative("include"));
+    generate_consts.linkLibC();
+
+    const generate_consts_step = b.addRunArtifact(generate_consts);
+    const output = generate_consts_step.addOutputFileArg("ts_constants.zig");
+
+    const write_file = b.addWriteFiles();
+    write_file.addCopyFileToSource(output, "src/ts_constants.zig");
+    const generate = b.step("gen", "generate ts constants");
+    generate.dependOn(&write_file.step);
+
+    // Compilation step
     const exe = b.addExecutable(.{
         .name = "lsp",
-        // In this case the main source file is merely a path, however, in more
-        // complicated build scripts, this could be a generated file.
         .root_source_file = .{ .path = "src/main.zig" },
         .target = target,
         .optimize = optimize,
     });
-    exe.addObjectFile(std.Build.FileSource.relative("lib/libtree-sitter.a"));
-    exe.addObjectFile(std.Build.FileSource.relative("lib/libtree-sitter-java.a"));
-    exe.addIncludePath(FileSource.relative("include"));
+
+    exe.addObjectFile(std.Build.LazyPath.relative("lib/libtree-sitter.a"));
+    exe.addObjectFile(std.Build.LazyPath.relative("lib/libtree-sitter-java.a"));
+    exe.addIncludePath(std.Build.LazyPath.relative("include"));
     exe.linkLibC();
 
     // This declares intent for the executable to be installed into the
@@ -33,19 +44,23 @@ pub fn build(b: *std.Build) void {
     // step when running `zig build`).
     b.installArtifact(exe);
 
-    // Creates a step for unit testing. This only builds the test executable
-    // but does not run it.
+
+    // Test step
+    const filter = b.option([]const u8, "f", "Test filter");
     const unit_tests = b.addTest(.{
         .root_source_file = .{ .path = "src/main.zig" },
         .target = target,
         .optimize = optimize,
+        .filter = filter,
     });
+    unit_tests.addObjectFile(std.Build.LazyPath.relative("lib/libtree-sitter.a"));
+    unit_tests.addObjectFile(std.Build.LazyPath.relative("lib/libtree-sitter-java.a"));
+    unit_tests.addIncludePath(std.Build.LazyPath.relative("include"));
+    unit_tests.linkLibC();
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
+    run_unit_tests.has_side_effects = true;
 
-    // Similar to creating the run step earlier, this exposes a `test` step to
-    // the `zig build --help` menu, providing a way for the user to request
-    // running the unit tests.
     const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&run_unit_tests.step );
+    test_step.dependOn(&run_unit_tests.step);
 }
