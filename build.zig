@@ -57,6 +57,7 @@ pub fn build(b: *std.Build) void {
     unit_tests.addObjectFile(std.Build.LazyPath.relative("lib/libtree-sitter-java.a"));
     unit_tests.addIncludePath(std.Build.LazyPath.relative("include"));
     unit_tests.linkLibC();
+    unit_tests.step.dependOn(b.getInstallStep());
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
     run_unit_tests.has_side_effects = true;

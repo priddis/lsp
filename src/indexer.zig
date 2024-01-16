@@ -35,6 +35,7 @@ pub const Tables = struct {
         return .{ .class_lookup = ClassTable.init(alloc), .method_lookup = MethodTable.init(alloc) };
     }
 };
+pub var index: Tables = undefined;
 
 const package_query_text = "(package_declaration (scoped_identifier) @name)";
 const classes_query_text = "(class_declaration name: (identifier) @name)";
@@ -111,7 +112,8 @@ pub fn indexProject(alloc: std.mem.Allocator, project: []const u8) IndexingError
             }
         }
     }
-    return .{ .class_lookup = class_lookup, .method_lookup = method_lookup };
+    index = .{ .class_lookup = class_lookup, .method_lookup = method_lookup };
+    return index;
 }
 
 fn collectPackage(alloc: std.mem.Allocator, query: *c.TSQuery, tree: *c.TSTree, text: []const u8) ![]u8 {
@@ -166,7 +168,8 @@ fn collectClasses(alloc: std.mem.Allocator, _collect: *ClassTable, query: *c.TSQ
             const start = c.ts_node_start_byte(capture.node);
             const end = c.ts_node_end_byte(capture.node);
             const point = c.ts_node_start_point(capture.node);
-            const match_str: []u8 = try std.mem.concat(alloc, u8, &.{package, text[start..end]});
+            const match_str: []u8 = try std.mem.concat(alloc, u8, &.{package, ".", text[start..end]});
+            //std.debug.print("match_str = {s}\n", .{match_str});
             try collect.put(match_str, .{ .uri = uri, .position = .{ .row = point.row, .column = point.column }, .method_range = method_range});
         }
     }
@@ -181,7 +184,7 @@ test "test indexProject" {
     const tables = try indexProject(alloc, "/home/micah/code/lsp/src/testcode");
 
     try expectEqual(@as(usize, 6), tables.class_lookup.count());
-    try expectEqual(@as(usize, 69), tables.method_lookup.count());
+    try expectEqual(@as(usize, 107), tables.method_lookup.count());
 }
 
 test "test collectMatches" {
@@ -193,11 +196,11 @@ test "test collectMatches" {
     var cl = ClassTable.init(alloc);
 
     const path_uri = "hello";
-    const text = @embedFile("testcode/App.java");
+    const text = @embedFile("testcode/HashMap.java");
     const tree_opt = c.ts_parser_parse_string(parser, null, text, @intCast(text.len));
     const tree = tree_opt.?;
     defer c.ts_tree_delete(tree_opt);
-    try collectClasses(alloc, &cl, class_query, tree, text, path_uri, .{.start = 0, .end = 0}, "package");
+    try collectClasses(alloc, &cl, class_query, tree, text, path_uri, .{.start = 0, .end = 0}, "java.util");
     try std.testing.expectEqual(@as(usize, 1), cl.count());
-    try std.testing.expect(cl.contains("App"));
+    try std.testing.expect(cl.contains("java.util.HashMap"));
 }

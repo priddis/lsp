@@ -46,7 +46,7 @@ pub fn definition(allocator: std.mem.Allocator, req: lsp_messages.LspRequest) ?[
         return null; //TODO, does the server need to respond to a parsing error?
     };
     if (buffers[0]) |buf| {
-        if (buf.scopedSearch(params.position.line, params.position.character)) |point| {
+        if (buf.definition(params.position.line, params.position.character)) |point| {
             const location: lsp_messages.Location = .{ .uri = buf.uri, .range = .{ .start = .{ .line = point.row, .character = point.column}, .end = .{ .line = point.row, .character = point.column} } };
             const res = lsp_messages.LspResponse(@TypeOf(location)).build(location, req.id);
             return std.json.stringifyAlloc(allocator, res, .{ .emit_null_optional_fields = false }) catch { 
@@ -54,20 +54,6 @@ pub fn definition(allocator: std.mem.Allocator, req: lsp_messages.LspRequest) ?[
                 return null; 
             };
         }
-        //if (buf.findName(params.position.line, params.position.character)) |s| {
-            //logger.log("found name = {s}\n", .{s});
-
-            //const lookup = null;//Indexer.index_table.method_lookup.get(s);
-            //if (lookup) |l| {
-                //const location: lsp_messages.Location = .{ .uri = l.uri, .range = .{ .start = .{ .line = l.row, .character = l.column}, .end = .{ .line = l.row, .character = l.column} } };
-                //const res = lsp_messages.LspResponse(@TypeOf(location)).build(location, req.id);
-                //return std.json.stringifyAlloc(allocator, res, .{ .emit_null_optional_fields = false }) catch { 
-                    //std.log.err("Error stringifying response {?}\n", .{res});
-                    //return null; 
-                //};
-            //}
-
-        //}
     }
     return null;
 }

@@ -18,6 +18,8 @@ const TSSymbols = [_][:0]const u8 {
     "local_variable_declaration",
     "method_invocation",
     "formal_parameter",
+    "formal_parameters",
+
     //"class_declaration",
 };
 
