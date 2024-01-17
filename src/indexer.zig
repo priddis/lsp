@@ -139,8 +139,7 @@ fn collectPackage(tree: *c.TSTree, text: []const u8) IndexingError![]const u8 {
     return IndexingError.NoPackageFound;
 }
 
-fn collectMethods(alloc: std.mem.Allocator, _collect: *MethodTable, query: *c.TSQuery, tree: *c.TSTree, text: []const u8) IndexingError!void {
-    var collect = _collect;
+fn collectMethods(alloc: std.mem.Allocator, collect: *MethodTable, query: *c.TSQuery, tree: *c.TSTree, text: []const u8) IndexingError!void {
     const root = c.ts_tree_root_node(tree);
 
     const cursor = c.ts_query_cursor_new();
@@ -176,7 +175,6 @@ fn collectClasses(alloc: std.mem.Allocator, _collect: *ClassTable, query: *c.TSQ
             const end = c.ts_node_end_byte(capture.node);
             const point = c.ts_node_start_point(capture.node);
             const match_str: []u8 = std.mem.concat(alloc, u8, &.{package, ".", text[start..end]}) catch @panic("OOM");
-            //std.debug.print("match_str = {s}\n", .{match_str});
             collect.put(match_str, .{ .uri = uri, .position = .{ .row = point.row, .column = point.column }, .method_range = method_range}) catch @panic("OOM");
         }
     }

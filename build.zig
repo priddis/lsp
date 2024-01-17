@@ -58,9 +58,17 @@ pub fn build(b: *std.Build) void {
     unit_tests.addIncludePath(std.Build.LazyPath.relative("include"));
     unit_tests.linkLibC();
     unit_tests.step.dependOn(b.getInstallStep());
+    const coverage = b.option(bool, "test-coverage", "Generate test coverage") orelse false;
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
     run_unit_tests.has_side_effects = true;
+
+    if (coverage) {
+        const kcov = b.addSystemCommand(&.{ "kcov", "kcov-out" });
+        kcov.addArtifactArg(unit_tests);
+        run_unit_tests.step.dependOn(&kcov.step);
+    }
+
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
