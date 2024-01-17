@@ -1,3 +1,4 @@
+//TODO- Revaluate uses of 'unreachable' in this file
 const std = @import("std");
 const assert = std.debug.assert;
 const File = std.fs.File;
@@ -6,6 +7,7 @@ const IndexingError = @import("errors.zig").IndexingError;
 const c = @cImport({
     @cInclude("tree_sitter/api.h");
 });
+const Symbols = @import("ts_constants.zig").Symbols;
 
 extern "c" fn tree_sitter_java() *c.TSLanguage;
 
@@ -71,11 +73,16 @@ pub fn indexProject(alloc: std.mem.Allocator, project: []const u8) IndexingError
     var method_lookup = MethodTable.init(alloc);
     method_lookup = MethodTable.init(alloc);
 
-    var it = try std.fs.openDirAbsolute(project, .{ .iterate = true, .access_sub_paths = true, .no_follow = true });
+    var it = std.fs.openDirAbsolute(project, .{ .iterate = true, .access_sub_paths = true, .no_follow = true }) catch |err| switch (err) {
+        else => unreachable,
+    };
     defer it.close();
 
-    var walker = try it.walk(alloc);
-    while (try walker.next()) |entry| {
+    var walker = it.walk(alloc) catch |err| switch (err) {
+        error.OutOfMemory => @panic("OOM"),
+        else => unreachable,
+    };
+    while (walker.next() catch unreachable) |entry| {
         if (entry.basename.len > 5) {
             const filetype: []const u8 = entry.basename[entry.basename.len - 5 ..];
             if (entry.kind == .file and std.mem.eql(u8, filetype, ".java")) {
@@ -101,10 +108,9 @@ pub fn indexProject(alloc: std.mem.Allocator, project: []const u8) IndexingError
                     try collectMethods(alloc, &method_lookup, method_query, tree, text);
                     const method_end = method_lookup.count();
 
-                    const package = try collectPackage(alloc, package_query, tree, text);
-
-                    const path_uri: []u8 = try std.mem.concat(alloc, u8, &.{ "file://", project, "/", entry.path });
-                    try collectClasses(alloc, &class_lookup, class_query, tree, text, path_uri, .{ .start = method_start, .end = method_end}, package);
+                    const package = try collectPackage(tree, text);
+                    const path_uri: []u8 = std.mem.concat(alloc, u8, &.{ "file://", project, "/", entry.path }) catch @panic("OOM");
+                    collectClasses(alloc, &class_lookup, class_query, tree, text, path_uri, .{ .start = method_start, .end = method_end}, package);
                 } else {
                     Logger.log("AST not found {s}\n", .{entry.path});
                     unreachable;
@@ -116,25 +122,24 @@ pub fn indexProject(alloc: std.mem.Allocator, project: []const u8) IndexingError
     return index;
 }
 
-fn collectPackage(alloc: std.mem.Allocator, query: *c.TSQuery, tree: *c.TSTree, text: []const u8) ![]u8 {
+fn collectPackage(tree: *c.TSTree, text: []const u8) IndexingError![]const u8 {
     const root = c.ts_tree_root_node(tree);
+    var node = c.ts_node_child(root, 0);
 
-    const cursor = c.ts_query_cursor_new();
-    c.ts_query_cursor_exec(cursor, query, root);
-
-    var match: c.TSQueryMatch = undefined;
-    while (c.ts_query_cursor_next_match(cursor, &match)) {
-        const captures: [*]const c.TSQueryCapture = match.captures;
-        for (captures[0..match.capture_count]) |capture| {
-            const start = c.ts_node_start_byte(capture.node);
-            const end = c.ts_node_end_byte(capture.node);
-            return try alloc.dupe(u8, text[start..end]);
+    while (!c.ts_node_is_null(node)) {
+        defer node = c.ts_node_next_named_sibling(node);
+        const symbol = c.ts_node_symbol(node);
+        if (symbol == Symbols.package_declaration) {
+            const package_decl = c.ts_node_named_child(node, 0);
+            const start = c.ts_node_start_byte(package_decl);
+            const end = c.ts_node_end_byte(package_decl);
+            return text[start .. end];
         }
     }
-    return IndexingError.Unexpected;
+    return IndexingError.NoPackageFound;
 }
 
-fn collectMethods(alloc: std.mem.Allocator, _collect: *MethodTable, query: *c.TSQuery, tree: *c.TSTree, text: []const u8) !void {
+fn collectMethods(alloc: std.mem.Allocator, _collect: *MethodTable, query: *c.TSQuery, tree: *c.TSTree, text: []const u8) IndexingError!void {
     var collect = _collect;
     const root = c.ts_tree_root_node(tree);
 
@@ -148,13 +153,15 @@ fn collectMethods(alloc: std.mem.Allocator, _collect: *MethodTable, query: *c.TS
             const start = c.ts_node_start_byte(capture.node);
             const end = c.ts_node_end_byte(capture.node);
             const point = c.ts_node_start_point(capture.node);
-            const match_str: []u8 = try alloc.dupe(u8, text[start..end]);
-            try collect.put(match_str, .{ .row = point.row, .column = point.column });
+            const match_str: []u8 = alloc.dupe(u8, text[start..end]) catch @panic("OOM");
+            collect.put(match_str, .{ .row = point.row, .column = point.column }) catch |err| switch (err) {
+                error.OutOfMemory => @panic("OOM"),
+            };
         }
     }
 }
 
-fn collectClasses(alloc: std.mem.Allocator, _collect: *ClassTable, query: *c.TSQuery, tree: *c.TSTree, text: []const u8, uri: []const u8, method_range: Range, package: []const u8) !void {
+fn collectClasses(alloc: std.mem.Allocator, _collect: *ClassTable, query: *c.TSQuery, tree: *c.TSTree, text: []const u8, uri: []const u8, method_range: Range, package: []const u8) void {
     var collect = _collect;
     const root = c.ts_tree_root_node(tree);
 
@@ -168,14 +175,22 @@ fn collectClasses(alloc: std.mem.Allocator, _collect: *ClassTable, query: *c.TSQ
             const start = c.ts_node_start_byte(capture.node);
             const end = c.ts_node_end_byte(capture.node);
             const point = c.ts_node_start_point(capture.node);
-            const match_str: []u8 = try std.mem.concat(alloc, u8, &.{package, ".", text[start..end]});
+            const match_str: []u8 = std.mem.concat(alloc, u8, &.{package, ".", text[start..end]}) catch @panic("OOM");
             //std.debug.print("match_str = {s}\n", .{match_str});
-            try collect.put(match_str, .{ .uri = uri, .position = .{ .row = point.row, .column = point.column }, .method_range = method_range});
+            collect.put(match_str, .{ .uri = uri, .position = .{ .row = point.row, .column = point.column }, .method_range = method_range}) catch @panic("OOM");
         }
     }
 }
 
 const expectEqual = std.testing.expectEqual;
+test "collectPackage" {
+    init();
+    const text = @embedFile("testcode/HashMap.java");
+    const tree = c.ts_parser_parse_string(parser, null, text, @intCast(text.len));
+    const package = try collectPackage(tree.?, text);
+    try std.testing.expectEqualStrings("java.util", package);
+}
+
 test "test indexProject" {
     init();
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -200,7 +215,8 @@ test "test collectMatches" {
     const tree_opt = c.ts_parser_parse_string(parser, null, text, @intCast(text.len));
     const tree = tree_opt.?;
     defer c.ts_tree_delete(tree_opt);
-    try collectClasses(alloc, &cl, class_query, tree, text, path_uri, .{.start = 0, .end = 0}, "java.util");
+    collectClasses(alloc, &cl, class_query, tree, text, path_uri, .{.start = 0, .end = 0}, "java.util");
     try std.testing.expectEqual(@as(usize, 1), cl.count());
     try std.testing.expect(cl.contains("java.util.HashMap"));
 }
+

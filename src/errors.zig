@@ -24,6 +24,6 @@ const jlava_error = error{
 };
 
 pub const IndexingError = error{
-    ErrorDuringIndexing,
-    OutOfMemory,
-} || std.fs.File.OpenError;
+    NoPackageFound,
+    NoClassFound,
+};
