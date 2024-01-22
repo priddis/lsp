@@ -1,0 +1,29 @@
+Method overloading
+static fields
+Constructors
+Superclasses
+Packages
+Edit OpenBuffers
+track imported packages
+
+
+Design
+
+GoToDeclaration -> Symbol to type declaration
+GoToTypeDefinition -> GoToClass lookup
+GoToDefinition (var) -> GoToDeclaration
+GoToDefinition (method) -> GoToMethodDeclaration 
+GoToDefinition (class) -> GoToTypeDefinition 
+
+Find Usages (var) -> Find all usages of variable in scope
+Find Usages (method) -> Find all usages of method
+Find Usages (class) -> Find all usages of class
+
+
+classes -> 
+    indexed by:
+        package name + class name
+
+    contains:
+        methods
+

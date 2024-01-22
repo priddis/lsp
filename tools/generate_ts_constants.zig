@@ -21,6 +21,8 @@ const TSSymbols = [_][:0]const u8 {
     "formal_parameters",
     "package_declaration",
     "class_declaration",
+    "method_declaration",
+    "class_body"
 };
 
 pub fn main() !void {

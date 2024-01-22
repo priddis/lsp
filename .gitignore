@@ -5,3 +5,4 @@ err.log
 src/testcode
 test_projects
 tree-sitter
+kcov

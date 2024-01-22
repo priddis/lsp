@@ -12,4 +12,7 @@ pub const Symbols = struct {
 	pub const formal_parameter: u16 = 275;
 	pub const formal_parameters: u16 = 274;
 	pub const package_declaration: u16 = 227;
+	pub const class_declaration: u16 = 234;
+	pub const method_declaration: u16 = 280;
+	pub const class_body: u16 = 243;
 };

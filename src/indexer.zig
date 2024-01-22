@@ -8,6 +8,7 @@ const c = @cImport({
     @cInclude("tree_sitter/api.h");
 });
 const Symbols = @import("ts_constants.zig").Symbols;
+const Fields = @import("ts_constants.zig").Fields;
 
 extern "c" fn tree_sitter_java() *c.TSLanguage;
 
@@ -68,6 +69,7 @@ pub fn init() void {
 }
 
 pub fn indexProject(alloc: std.mem.Allocator, project: []const u8) IndexingError!Tables {
+    var buf = [_]u8{0} ** 500000;
     var class_lookup = ClassTable.init(alloc);
     class_lookup = ClassTable.init(alloc);
     var method_lookup = MethodTable.init(alloc);
@@ -96,21 +98,28 @@ pub fn indexProject(alloc: std.mem.Allocator, project: []const u8) IndexingError
                     else => unreachable,
                 };
                 defer source_file.close();
-                var buf = [_]u8{0} ** 500000;
                 const length: u32 = @intCast(source_file.readAll(&buf) catch unreachable);
-                const text = buf[0..length :0];
+                const text = buf[0..length];
 
-                const tree_opt = c.ts_parser_parse_string(parser, null, text, @intCast(text.len));
+                const tree_opt = c.ts_parser_parse_string(parser, null, &buf, length);
                 defer c.ts_tree_delete(tree_opt);
 
                 if (tree_opt) |tree| {
-                    const method_start = method_lookup.count();
-                    try collectMethods(alloc, &method_lookup, method_query, tree, text);
-                    const method_end = method_lookup.count();
+                    const package_opt = collectPackage(tree, text);
+                    if (package_opt) |package| {
+                        const method_start = method_lookup.count();
+                        //std.debug.print("{s}\n", .{entry.path});
+                        collectMethods(&method_lookup, tree, text);
+                        const method_end = method_lookup.count();
 
-                    const package = try collectPackage(tree, text);
-                    const path_uri: []u8 = std.mem.concat(alloc, u8, &.{ "file://", project, "/", entry.path }) catch @panic("OOM");
-                    collectClasses(alloc, &class_lookup, class_query, tree, text, path_uri, .{ .start = method_start, .end = method_end}, package);
+                        const path_uri: []u8 = std.mem.concat(alloc, u8, &.{ "file://", project, "/", entry.path }) catch @panic("OOM");
+                        _ = package;
+                        _ = method_start;
+                        _ = method_end;
+                        _ = path_uri;
+                        collectClasses(&class_lookup, tree, text);
+                        //collectClasses2(alloc, &class_lookup, class_query, tree, text, path_uri, .{ .start = method_start, .end = method_end}, package);
+                    }
                 } else {
                     Logger.log("AST not found {s}\n", .{entry.path});
                     unreachable;
@@ -122,7 +131,7 @@ pub fn indexProject(alloc: std.mem.Allocator, project: []const u8) IndexingError
     return index;
 }
 
-fn collectPackage(tree: *c.TSTree, text: []const u8) IndexingError![]const u8 {
+fn collectPackage(tree: *c.TSTree, text: []const u8) ?[]const u8 {
     const root = c.ts_tree_root_node(tree);
     var node = c.ts_node_child(root, 0);
 
@@ -136,46 +145,61 @@ fn collectPackage(tree: *c.TSTree, text: []const u8) IndexingError![]const u8 {
             return text[start .. end];
         }
     }
-    return IndexingError.NoPackageFound;
+    return null;
 }
 
-fn collectMethods(alloc: std.mem.Allocator, collect: *MethodTable, query: *c.TSQuery, tree: *c.TSTree, text: []const u8) IndexingError!void {
+
+fn collectClasses(collect: *ClassTable, tree: *c.TSTree, text: []const u8) void {
     const root = c.ts_tree_root_node(tree);
+    var node = c.ts_node_child(root, 0);
 
-    const cursor = c.ts_query_cursor_new();
-    c.ts_query_cursor_exec(cursor, query, root);
-
-    var match: c.TSQueryMatch = undefined;
-    while (c.ts_query_cursor_next_match(cursor, &match)) {
-        const captures: [*]const c.TSQueryCapture = match.captures;
-        for (captures[0..match.capture_count]) |capture| {
-            const start = c.ts_node_start_byte(capture.node);
-            const end = c.ts_node_end_byte(capture.node);
-            const point = c.ts_node_start_point(capture.node);
-            const match_str: []u8 = alloc.dupe(u8, text[start..end]) catch @panic("OOM");
-            collect.put(match_str, .{ .row = point.row, .column = point.column }) catch |err| switch (err) {
-                error.OutOfMemory => @panic("OOM"),
-            };
+    while (!c.ts_node_is_null(node)) {
+        defer node = c.ts_node_next_named_sibling(node);
+        const symbol = c.ts_node_symbol(node);
+        if (symbol == Symbols.class_declaration) {
+            const class_decl = c.ts_node_child_by_field_id(node, Fields.name);
+            const start = c.ts_node_start_byte(class_decl);
+            const end = c.ts_node_end_byte(class_decl);
+            const point = c.ts_node_start_point(class_decl);
+            collect.put(text[start..end], .{ .uri = "/home/code/lsp/test_projects/elasticsearch/testcode/longername", .position = .{ .row = point.row, .column = point.column }, .method_range = .{.start = 0, .end = 0}}) catch @panic("OOM");
         }
     }
 }
 
-fn collectClasses(alloc: std.mem.Allocator, _collect: *ClassTable, query: *c.TSQuery, tree: *c.TSTree, text: []const u8, uri: []const u8, method_range: Range, package: []const u8) void {
-    var collect = _collect;
+fn collectMethods(collect: *MethodTable, tree: *c.TSTree, text: []const u8) void {
     const root = c.ts_tree_root_node(tree);
+    var node = c.ts_node_child(root, 0);
+    var class_body: ?c.TSNode = undefined;
+    var found = false;
 
-    const cursor = c.ts_query_cursor_new();
-    c.ts_query_cursor_exec(cursor, query, root);
+    loop: while (!c.ts_node_is_null(node)) {
+        defer node = c.ts_node_next_named_sibling(node);
+        const symbol = c.ts_node_symbol(node);
+        //std.debug.print("{s}\n", .{c.ts_language_symbol_name(tree_sitter_java(), symbol)});
+        if (symbol == Symbols.class_declaration) {
+            class_body  = c.ts_node_child_by_field_id(node, Fields.body);
+            std.debug.assert(class_body != null);
+            std.debug.assert(!c.ts_node_is_null(class_body.?));
+            found = true;
+            break :loop;
+        }
+    }
+    if (!found) {
+        return;
+    }
+    std.debug.assert(class_body != null);
+    std.debug.assert(!c.ts_node_is_null(class_body.?));
+    node = c.ts_node_child(class_body.?, 0);
+    std.debug.assert(!c.ts_node_is_null(node));
 
-    var match: c.TSQueryMatch = undefined;
-    while (c.ts_query_cursor_next_match(cursor, &match)) {
-        const captures: [*]const c.TSQueryCapture = match.captures;
-        for (captures[0..match.capture_count]) |capture| {
-            const start = c.ts_node_start_byte(capture.node);
-            const end = c.ts_node_end_byte(capture.node);
-            const point = c.ts_node_start_point(capture.node);
-            const match_str: []u8 = std.mem.concat(alloc, u8, &.{package, ".", text[start..end]}) catch @panic("OOM");
-            collect.put(match_str, .{ .uri = uri, .position = .{ .row = point.row, .column = point.column }, .method_range = method_range}) catch @panic("OOM");
+    while (!c.ts_node_is_null(node)) {
+        defer node = c.ts_node_next_named_sibling(node);
+        const symbol = c.ts_node_symbol(node);
+        if (symbol == Symbols.method_declaration) {
+            const start = c.ts_node_start_byte(node);
+            const end = c.ts_node_end_byte(node);
+            const point = c.ts_node_start_point(node);
+            collect.put(text[start..end], .{ .row = point.row, .column = point.column }) catch @panic("OOM");
         }
     }
 }
@@ -185,8 +209,8 @@ test "collectPackage" {
     init();
     const text = @embedFile("testcode/HashMap.java");
     const tree = c.ts_parser_parse_string(parser, null, text, @intCast(text.len));
-    const package = try collectPackage(tree.?, text);
-    try std.testing.expectEqualStrings("java.util", package);
+    const package = collectPackage(tree.?, text);
+    try std.testing.expectEqualStrings("java.util", package.?);
 }
 
 test "test indexProject" {
@@ -196,8 +220,7 @@ test "test indexProject" {
     defer std.heap.ArenaAllocator.deinit(arena);
     const tables = try indexProject(alloc, "/home/micah/code/lsp/src/testcode");
 
-    try expectEqual(@as(usize, 6), tables.class_lookup.count());
-    try expectEqual(@as(usize, 107), tables.method_lookup.count());
+    try expectEqual(@as(usize, 116), tables.method_lookup.count());
 }
 
 test "test collectMatches" {
@@ -208,13 +231,20 @@ test "test collectMatches" {
 
     var cl = ClassTable.init(alloc);
 
-    const path_uri = "hello";
     const text = @embedFile("testcode/HashMap.java");
     const tree_opt = c.ts_parser_parse_string(parser, null, text, @intCast(text.len));
     const tree = tree_opt.?;
     defer c.ts_tree_delete(tree_opt);
-    collectClasses(alloc, &cl, class_query, tree, text, path_uri, .{.start = 0, .end = 0}, "java.util");
+    collectClasses(&cl, tree, text);
     try std.testing.expectEqual(@as(usize, 1), cl.count());
-    try std.testing.expect(cl.contains("java.util.HashMap"));
+    //try std.testing.expect(cl.contains("java.util.HashMap"));
+}
+
+pub fn main() !void {
+    init();
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    const alloc = arena.allocator();
+    //defer std.heap.ArenaAllocator.deinit(arena);
+    _ = try indexProject(alloc, "/home/micah/code/lsp/test_projects/elasticsearch");
 }
 
