@@ -12,23 +12,23 @@ const Fields = @import("ts_constants.zig").Fields;
 
 extern "c" fn tree_sitter_java() *c.TSLanguage;
 
-const Lookup = struct {
+pub const Lookup = struct {
     row: u32 = 0,
     column: u32 = 0,
 };
 
-const Range = struct {
+pub const Range = struct {
     start: usize = 0,
     end: usize = 0,
 };
 
-const ClassTable = std.StringArrayHashMap(struct {
+pub const ClassTable = std.StringArrayHashMap(struct {
     position: Lookup,
     method_range: Range,
     uri: []const u8,
 });
 
-const MethodTable = std.StringArrayHashMap(Lookup);
+pub const MethodTable = std.StringHashMap(Lookup);
 
 pub const Tables = struct {
     class_lookup: ClassTable,
@@ -38,32 +38,10 @@ pub const Tables = struct {
         return .{ .class_lookup = ClassTable.init(alloc), .method_lookup = MethodTable.init(alloc) };
     }
 };
-pub var index: Tables = undefined;
-
-const package_query_text = "(package_declaration (scoped_identifier) @name)";
-const classes_query_text = "(class_declaration name: (identifier) @name)";
-const methods_query_text = "(method_declaration name: (identifier) @name)";
-
-var package_query: *c.TSQuery = undefined;
-var class_query: *c.TSQuery = undefined;
-var method_query: *c.TSQuery = undefined;
 var parser: *c.TSParser = undefined;
 
 ///Sets up parsers and queries
 pub fn init() void {
-    var error_type: c.TSQueryError = c.TSQueryErrorNone;
-    var err_offset: u32 = 0;
-    assert(error_type == c.TSQueryErrorNone);
-
-    package_query = c.ts_query_new(tree_sitter_java(), package_query_text, package_query_text.len, &err_offset, &error_type).?;
-    assert(error_type == c.TSQueryErrorNone);
-
-    class_query = c.ts_query_new(tree_sitter_java(), classes_query_text, classes_query_text.len, &err_offset, &error_type).?;
-    assert(error_type == c.TSQueryErrorNone);
-
-    method_query = c.ts_query_new(tree_sitter_java(), methods_query_text, methods_query_text.len, &err_offset, &error_type).?;
-    assert(error_type == c.TSQueryErrorNone);
-
     parser = c.ts_parser_new().?;
     _ = c.ts_parser_set_language(parser, tree_sitter_java());
 }
@@ -71,20 +49,17 @@ pub fn init() void {
 pub fn indexProject(alloc: std.mem.Allocator, project: []const u8) IndexingError!Tables {
     var buf = [_]u8{0} ** 500000;
     var class_lookup = ClassTable.init(alloc);
-    class_lookup = ClassTable.init(alloc);
     var method_lookup = MethodTable.init(alloc);
-    method_lookup = MethodTable.init(alloc);
 
     var it = std.fs.openDirAbsolute(project, .{ .iterate = true, .access_sub_paths = true, .no_follow = true }) catch |err| switch (err) {
-        else => unreachable,
+        else => @panic("Could not open directory"),
     };
     defer it.close();
 
     var walker = it.walk(alloc) catch |err| switch (err) {
         error.OutOfMemory => @panic("OOM"),
-        else => unreachable,
     };
-    while (walker.next() catch unreachable) |entry| {
+    while (walker.next() catch @panic("Cannot navigate dir")) |entry| {
         if (entry.basename.len > 5) {
             const filetype: []const u8 = entry.basename[entry.basename.len - 5 ..];
             if (entry.kind == .file and std.mem.eql(u8, filetype, ".java")) {
@@ -108,30 +83,23 @@ pub fn indexProject(alloc: std.mem.Allocator, project: []const u8) IndexingError
                     const package_opt = collectPackage(tree, text);
                     if (package_opt) |package| {
                         const method_start = method_lookup.count();
-                        //std.debug.print("{s}\n", .{entry.path});
                         collectMethods(&method_lookup, tree, text);
                         const method_end = method_lookup.count();
 
                         const path_uri: []u8 = std.mem.concat(alloc, u8, &.{ "file://", project, "/", entry.path }) catch @panic("OOM");
-                        _ = package;
-                        _ = method_start;
-                        _ = method_end;
-                        _ = path_uri;
-                        collectClasses(&class_lookup, tree, text);
-                        //collectClasses2(alloc, &class_lookup, class_query, tree, text, path_uri, .{ .start = method_start, .end = method_end}, package);
+                        collectClasses(alloc, &class_lookup, tree, text, path_uri, package, @truncate( method_start), @truncate(method_end));
                     }
                 } else {
-                    Logger.log("AST not found {s}\n", .{entry.path});
-                    unreachable;
+                    //TODO: remove if not hit in testing, otherwise handle
+                    @panic("AST not created");
                 }
             }
         }
     }
-    index = .{ .class_lookup = class_lookup, .method_lookup = method_lookup };
-    return index;
+    return .{ .class_lookup = class_lookup, .method_lookup = method_lookup };
 }
 
-fn collectPackage(tree: *c.TSTree, text: []const u8) ?[]const u8 {
+pub fn collectPackage(tree: *c.TSTree, text: []const u8) ?[]const u8 {
     const root = c.ts_tree_root_node(tree);
     var node = c.ts_node_child(root, 0);
 
@@ -149,7 +117,8 @@ fn collectPackage(tree: *c.TSTree, text: []const u8) ?[]const u8 {
 }
 
 
-fn collectClasses(collect: *ClassTable, tree: *c.TSTree, text: []const u8) void {
+//TODO-parse inner classes + multiple classes in the same file (Single file program feature?)
+pub fn collectClasses(alloc: std.mem.Allocator, collect: *ClassTable, tree: *c.TSTree, text: []const u8, uri: []const u8, package: []const u8, method_start: u32, method_end: u32) void {
     const root = c.ts_tree_root_node(tree);
     var node = c.ts_node_child(root, 0);
 
@@ -161,12 +130,14 @@ fn collectClasses(collect: *ClassTable, tree: *c.TSTree, text: []const u8) void 
             const start = c.ts_node_start_byte(class_decl);
             const end = c.ts_node_end_byte(class_decl);
             const point = c.ts_node_start_point(class_decl);
-            collect.put(text[start..end], .{ .uri = "/home/code/lsp/test_projects/elasticsearch/testcode/longername", .position = .{ .row = point.row, .column = point.column }, .method_range = .{.start = 0, .end = 0}}) catch @panic("OOM");
+            const package_and_class = std.mem.concat(alloc, u8, &.{package, ".", text[start..end]}) catch @panic("OOM");
+            collect.put(package_and_class, .{ .uri = uri, .position = .{ .row = point.row, .column = point.column }, .method_range = .{.start = method_start, .end = method_end}}) catch @panic("OOM");
+            return;
         }
     }
 }
 
-fn collectMethods(collect: *MethodTable, tree: *c.TSTree, text: []const u8) void {
+pub fn collectMethods(collect: *MethodTable, tree: *c.TSTree, text: []const u8) void {
     const root = c.ts_tree_root_node(tree);
     var node = c.ts_node_child(root, 0);
     var class_body: ?c.TSNode = undefined;
@@ -175,7 +146,6 @@ fn collectMethods(collect: *MethodTable, tree: *c.TSTree, text: []const u8) void
     loop: while (!c.ts_node_is_null(node)) {
         defer node = c.ts_node_next_named_sibling(node);
         const symbol = c.ts_node_symbol(node);
-        //std.debug.print("{s}\n", .{c.ts_language_symbol_name(tree_sitter_java(), symbol)});
         if (symbol == Symbols.class_declaration) {
             class_body  = c.ts_node_child_by_field_id(node, Fields.body);
             std.debug.assert(class_body != null);
@@ -213,17 +183,17 @@ test "collectPackage" {
     try std.testing.expectEqualStrings("java.util", package.?);
 }
 
-test "test indexProject" {
+test "indexProject" {
     init();
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     const alloc = arena.allocator();
     defer std.heap.ArenaAllocator.deinit(arena);
     const tables = try indexProject(alloc, "/home/micah/code/lsp/src/testcode");
 
-    try expectEqual(@as(usize, 116), tables.method_lookup.count());
+    try expectEqual(@as(usize, 118), tables.method_lookup.count());
 }
 
-test "test collectMatches" {
+test "collectClasses" {
     init();
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     const alloc = arena.allocator();
@@ -235,9 +205,9 @@ test "test collectMatches" {
     const tree_opt = c.ts_parser_parse_string(parser, null, text, @intCast(text.len));
     const tree = tree_opt.?;
     defer c.ts_tree_delete(tree_opt);
-    collectClasses(&cl, tree, text);
+    collectClasses(alloc, &cl, tree, text, "testcode/HashMap.java", "java.util", 0, 0);
     try std.testing.expectEqual(@as(usize, 1), cl.count());
-    //try std.testing.expect(cl.contains("java.util.HashMap"));
+    try std.testing.expect(cl.contains("java.util.HashMap"));
 }
 
 pub fn main() !void {

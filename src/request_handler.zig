@@ -18,6 +18,7 @@ pub fn recv() UnrecoverableError!void {
     defer parsed_json.deinit();
     const req = parsed_json.value;
     logger.log("request - : {s}\n", .{json_buf[0..length]});
+
     const res_option: ?[]const u8 = handle(req);
 
     const stdout = std.io.getStdOut();

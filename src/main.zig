@@ -1,15 +1,16 @@
 const std = @import("std");
 const logger = @import("log.zig");
-const handler = @import("request_handler.zig");
+const request_handler = @import("request_handler.zig");
 
 pub fn main() void {
-    while (true) { handler.recv() catch |err| {
+    while (true) { request_handler.recv() catch |err| {
             std.log.err("top level err {any}\n", .{err});
             return;
         };
     }
 }
 
+// Logic for logging errors on panic
 pub fn panic(msg: []const u8, trace_opt: ?*std.builtin.StackTrace, addr: ?usize) noreturn {
     @setCold(true);
     if (trace_opt) |trace| {

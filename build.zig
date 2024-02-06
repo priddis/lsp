@@ -29,7 +29,7 @@ pub fn build(b: *std.Build) void {
     // Compilation step
     const exe = b.addExecutable(.{
         .name = "lsp",
-        .root_source_file = .{ .path = "src/indexer.zig" },
+        .root_source_file = .{ .path = "src/main.zig" },
         .target = target,
         .optimize = optimize,
     });
