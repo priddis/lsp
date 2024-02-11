@@ -1,8 +1,13 @@
 const std = @import("std");
 const logger = @import("log.zig");
 const request_handler = @import("request_handler.zig");
+const ts_helpers = @import("ts_helpers.zig");
+const core = @import("core.zig");
+const indexer = @import("indexer.zig");
 
 pub fn main() void {
+    core.init(std.heap.page_allocator);
+    ts_helpers.init();
     while (true) { request_handler.recv() catch |err| {
             std.log.err("top level err {any}\n", .{err});
             return;

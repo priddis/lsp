@@ -67,6 +67,12 @@ pub fn varOrMethod(node: c.TSNode) SourceType {
     return .method;
 }
 
+pub fn nodeToText(node: c.TSNode, text: []const u8) []const u8 {
+    std.debug.assert(!c.ts_node_is_null(node));
+    const start = c.ts_node_start_byte(node);
+    const end = c.ts_node_end_byte(node);
+    return text[start..end];
+}
 
 const array_list_code = @embedFile("testcode/ArrayListSmall.java");
 const array_list_code2 = @embedFile("testcode/ArrayListSmall2.java");

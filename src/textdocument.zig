@@ -10,7 +10,7 @@ const parse_options = .{ .allocate = .alloc_always, .ignore_unknown_fields = tru
 //Handlers
 pub fn didOpen(allocator: std.mem.Allocator, req: lsp_messages.LspRequest) ?[]const u8 {
     const params = std.json.parseFromValue(lsp_messages.DidOpenTextDocumentParams, allocator, req.params.?, parse_options) catch {
-        logger.log("Error parsing params {?}\n", .{req.params});
+        logger.log("Error parsing didOpen params {?}\n", .{req.params});
         return null; //TODO, does the server need to respond to a parsing error?
     };
     const b = Buffer.open(allocator, params.value.textDocument.uri, params.value.textDocument.text) catch |err| {
@@ -23,7 +23,7 @@ pub fn didOpen(allocator: std.mem.Allocator, req: lsp_messages.LspRequest) ?[]co
 
 pub fn didChange(allocator: std.mem.Allocator, req: lsp_messages.LspRequest) ?[]const u8 {
     const params = std.json.innerParseFromValue(lsp_messages.DidChangeTextDocumentParams, allocator, req.params.?, parse_options) catch {
-        logger.log("Error parsing params {?}\n", .{req.params});
+        logger.log("Error parsing didChange params {?}\n", .{req.params});
         return null; //TODO, does the server need to respond to a parsing error?
     };
     for (params.contentChanges) |contentChanges| {
@@ -48,7 +48,7 @@ pub fn didChange(allocator: std.mem.Allocator, req: lsp_messages.LspRequest) ?[]
 
 pub fn didClose(allocator: std.mem.Allocator, req: lsp_messages.LspRequest) ?[]const u8 {
     const params = std.json.innerParseFromValue(lsp_messages.DidCloseTextDocumentParams, allocator, req.params.?, parse_options) catch {
-        logger.log("Error parsing params {?}\n", .{req.params});
+        logger.log("Error didClose parsing params {?}\n", .{req.params});
         return null; //TODO, does the server need to respond to a parsing error?
     };
     if (core.findBuffer(params.textDocument.uri)) |buffer| {
@@ -59,7 +59,26 @@ pub fn didClose(allocator: std.mem.Allocator, req: lsp_messages.LspRequest) ?[]c
 
 pub fn definition(allocator: std.mem.Allocator, req: lsp_messages.LspRequest) ?[]const u8 {
     const params = std.json.innerParseFromValue(lsp_messages.DefinitionParams, allocator, req.params.?, parse_options) catch {
-        logger.log("Error parsing params {?}\n", .{req.params});
+        logger.log("Error definition parsing params {?}\n", .{req.params});
+        return null; //TODO, does the server need to respond to a parsing error?
+    };
+
+    const location_opt = core.definition(params.textDocument.uri, params.position.line, params.position.character);
+    if (location_opt) |location| {
+        const res = lsp_messages.LspResponse(@TypeOf(location)).build(location, req.id);
+        return std.json.stringifyAlloc(allocator, res, .{ .emit_null_optional_fields = false }) catch { 
+            std.log.err("Error stringifying response {?}\n", .{res});
+            return null; 
+        };
+    } else {
+        //TODO: return method not found
+        return null;
+    }
+}
+
+pub fn typeDefinition(allocator: std.mem.Allocator, req: lsp_messages.LspRequest) ?[]const u8 {
+    const params = std.json.innerParseFromValue(lsp_messages.TypeDefinitionParams, allocator, req.params.?, parse_options) catch {
+        logger.log("Error definition parsing params {?}\n", .{req.params});
         return null; //TODO, does the server need to respond to a parsing error?
     };
 

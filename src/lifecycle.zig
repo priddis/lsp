@@ -15,7 +15,7 @@ const parse_options = .{ .allocate = .alloc_always, .ignore_unknown_fields = tru
 
 pub fn initialize(allocator: std.mem.Allocator, req: lsp_messages.LspRequest) ?[]const u8 {
     const params = std.json.innerParseFromValue(lsp_messages.InitializeParams, allocator, req.params.?, parse_options) catch {
-        std.log.err("Error parsing params {any}\n", .{req.params});
+        std.log.err("Error parsing initialize params {any}\n", .{req.params});
         return null; //TODO, does the server need to respond to a parsing error?
     };
     logger.log("initialize params {any}\n", .{params});
@@ -23,8 +23,12 @@ pub fn initialize(allocator: std.mem.Allocator, req: lsp_messages.LspRequest) ?[
     const res = lsp_messages.LspResponse(@TypeOf(init_result)).build(init_result, req.id);
 
     if (params.rootUri) |uri_string| {
-        logger.log("opening path {s}\n", .{uri_string});
-        core.init(allocator, uri_string);
+        logger.log("parsing {s}\n", .{uri_string});
+        const path = std.Uri.parse(uri_string) catch return null;
+        logger.log("opening path {s}\n", .{path});
+        std.debug.assert(path.path.len > 1);
+        core.indexProject(allocator, path.path);
+        logger.log("completed indexing ....", .{});
     }
 
     return std.json.stringifyAlloc(allocator, res, .{ .emit_null_optional_fields = false }) catch {
@@ -39,16 +43,18 @@ pub fn initialized(allocator: std.mem.Allocator, req: lsp_messages.LspRequest) ?
     return null;
 }
 pub fn shutdown(allocator: std.mem.Allocator, req: lsp_messages.LspRequest) ?[]const u8 {
-    std.log.err("shutdown server\n", .{});
+
+    //std.log.err("shutdown server\n", .{});
     const params = std.json.innerParseFromValue(lsp_messages.InitializedParams, allocator, req.params.?, parse_options) catch {
-        std.log.err("Error parsing params {?}\n", .{req.params});
+        logger.log("Error parsing shutdown params {?}\n", .{req.params});
         return null; //TODO, does the server need to respond to a parsing error?
     };
     _ = params;
     return null;
 }
+
 pub fn exit(allocator: std.mem.Allocator, req: lsp_messages.LspRequest) ?[]const u8 {
-    std.log.err("exit server\n", .{});
+    logger.log("exit server\n", .{});
     _ = allocator;
     _ = req;
     std.process.exit(0);

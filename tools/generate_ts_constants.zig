@@ -11,6 +11,8 @@ const TSFields = [_][:0]const u8 {
     "object",
     "parameters",
     "body",
+    "type",
+    "declarator",
 };
 
 const TSSymbols = [_][:0]const u8 {
@@ -20,9 +22,12 @@ const TSSymbols = [_][:0]const u8 {
     "formal_parameter",
     "formal_parameters",
     "package_declaration",
+    "import_declaration",
     "class_declaration",
     "method_declaration",
-    "class_body"
+    "class_body",
+    "type_identifier",
+    "variable_declarator",
 };
 
 pub fn main() !void {

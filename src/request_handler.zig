@@ -19,10 +19,9 @@ pub fn recv() UnrecoverableError!void {
     const req = parsed_json.value;
     logger.log("request - : {s}\n", .{json_buf[0..length]});
 
-    const res_option: ?[]const u8 = handle(req);
-
     const stdout = std.io.getStdOut();
-    if (res_option) |res| {
+
+    if (handle(req)) |res| {
         var buffer: [64]u8 = undefined;
         const prefix = std.fmt.bufPrint(&buffer, "Content-Length: {d}\r\n\r\n", .{res.len}) catch return UnrecoverableError.CouldNotSendResponse;
         logger.log("response - : {s}\n", .{res});
@@ -51,6 +50,7 @@ fn handle(req: lsp_messages.LspRequest) ?[]const u8 {
         .@"textDocument/didClose" => textdocument.didClose(allocator, req),
 
         .@"textDocument/definition" => textdocument.definition(allocator, req),
+        .@"textDocument/typeDefinition" => textdocument.typeDefinition(allocator, req),
     };
 }
 

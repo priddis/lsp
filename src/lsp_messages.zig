@@ -13,7 +13,9 @@ pub const LspMethod = enum {
     @"textDocument/didChange",
     @"textDocument/didClose",
 
+    // Language features
     @"textDocument/definition",
+    @"textDocument/typeDefinition",
 };
 pub const LspRequest = struct {
     jsonrpc: []const u8 = "2.0",

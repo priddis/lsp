@@ -44,7 +44,6 @@ pub fn build(b: *std.Build) void {
     // step when running `zig build`).
     b.installArtifact(exe);
 
-
     // Test step
     const filter = b.option([]const u8, "f", "Test filter");
     const unit_tests = b.addTest(.{
