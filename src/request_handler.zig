@@ -15,13 +15,15 @@ pub fn recv() UnrecoverableError!void {
     try stdin.reader().readNoEof(json_buf);
 
     const parsed_json = std.json.parseFromSlice(lsp_messages.LspRequest, allocator, json_buf[0..length], .{ .allocate = .alloc_always }) catch |err| return logger.throw("Could not parse request {!}", .{err}, UnrecoverableError.CouldNotParseRequest);
+
     defer parsed_json.deinit();
     const req = parsed_json.value;
     logger.log("request - : {s}\n", .{json_buf[0..length]});
 
     const stdout = std.io.getStdOut();
+    const payload = handle(req) catch @panic("Could not parse parameters");
 
-    if (handle(req)) |res| {
+    if (payload) |res| {
         var buffer: [64]u8 = undefined;
         const prefix = std.fmt.bufPrint(&buffer, "Content-Length: {d}\r\n\r\n", .{res.len}) catch return UnrecoverableError.CouldNotSendResponse;
         logger.log("response - : {s}\n", .{res});
@@ -31,27 +33,61 @@ pub fn recv() UnrecoverableError!void {
     }
 }
 
-fn handle(req: lsp_messages.LspRequest) ?[]const u8 {
+fn handle(req: lsp_messages.LspRequest) !?[]const u8 {
     const lsp_method = std.meta.stringToEnum(lsp_messages.LspMethod, req.method) orelse {
         logger.log("unrecognized method {s}\n", .{req.method});
         return null;
     };
     logger.log("method = {s}\n", .{req.method});
-    return switch (lsp_method) {
+    const inner_result = switch (lsp_method) {
         //lifecycle
-        .initialize => lifecycle.initialize(allocator, req),
-        .initialized => lifecycle.initialized(allocator, req),
-        .shutdown => lifecycle.shutdown(allocator, req),
-        .exit => lifecycle.exit(allocator, req),
-
+        .initialize => res: {
+            const parameters = try parseParameters(lsp_messages.InitializeParams, allocator, req);
+            break :res lifecycle.initialize(allocator, parameters);
+        },
+        .initialized => lifecycle.initialized(),
+        .shutdown => lifecycle.shutdown(),
+        .exit => lifecycle.exit(),
         //textdocument
-        .@"textDocument/didOpen" => textdocument.didOpen(allocator, req),
-        .@"textDocument/didChange" => textdocument.didChange(allocator, req),
-        .@"textDocument/didClose" => textdocument.didClose(allocator, req),
+        .@"textDocument/didOpen" => res: {
+            const parameters = try parseParameters(lsp_messages.DidOpenTextDocumentParams, allocator, req);
+            break :res textdocument.didOpen(allocator, parameters);
+        },
+        .@"textDocument/didChange" => res: {
+            const parameters = try parseParameters(lsp_messages.DidChangeTextDocumentParams, allocator, req);
+            break :res textdocument.didChange(allocator, parameters);
+        },
+        .@"textDocument/didClose" => res: {
+            const parameters = try parseParameters(lsp_messages.DidCloseTextDocumentParams, allocator, req);
+            break :res textdocument.didClose(allocator, parameters);
+        },
 
-        .@"textDocument/definition" => textdocument.definition(allocator, req),
-        .@"textDocument/typeDefinition" => textdocument.typeDefinition(allocator, req),
+        .@"textDocument/definition" => res: {
+            const parameters = try parseParameters(lsp_messages.DefinitionParams, allocator, req);
+            break :res textdocument.definition(parameters);
+        },
+        .@"textDocument/typeDefinition" => res: {
+            const parameters = try parseParameters(lsp_messages.TypeDefinitionParams, allocator, req);
+            break :res textdocument.typeDefinition(parameters);
+        },
+        .@"textDocument/references" => res: {
+            const parameters = try parseParameters(lsp_messages.ReferenceParams, allocator, req);
+            break :res textdocument.references(allocator, parameters);
+        },
     };
+    if (inner_result == .none) {
+        return null;
+    }
+    const res = lsp_messages.LspResponse(@TypeOf(inner_result)).build(inner_result, req.id);
+    return std.json.stringifyAlloc(allocator, res, .{ .emit_null_optional_fields = false }) catch {
+        std.log.err("Error stringifying response {?}\n", .{res});
+        return null;
+    };
+}
+
+const parse_options = .{ .allocate = .alloc_always, .ignore_unknown_fields = true };
+fn parseParameters(comptime ParameterType: type, alloc: std.mem.Allocator, req: lsp_messages.LspRequest) !ParameterType {
+    return try std.json.innerParseFromValue(ParameterType, alloc, req.params.?, parse_options);
 }
 
 fn parseLspHeader(alloc: std.mem.Allocator, reader: anytype) UnrecoverableError!usize {
@@ -130,4 +166,32 @@ test "test parseHeader" {
     fbs = std.io.fixedBufferStream("Content-Length: 6443\r\n");
     parse_error = parseLspHeader(std.testing.allocator, fbs.reader());
     try expectError(UnrecoverableError.CouldNotParseHeader, parse_error);
+}
+
+test "handle - Initialize" {
+    const raw_initialize = try @import("testdata/initialize.zig").json();
+
+    const parsed_json = std.json.parseFromSlice(lsp_messages.LspRequest, std.testing.allocator, raw_initialize[0..raw_initialize.len], .{ .allocate = .alloc_always }) catch |err| return logger.throw("Could not parse request {!}", .{err}, UnrecoverableError.CouldNotParseRequest);
+
+    defer parsed_json.deinit();
+    const req = parsed_json.value;
+
+    const payload = handle(req) catch @panic("Could not parse parameters");
+    const expected = "{\"jsonrpc\":\"2.0\",\"result\":{\"init_result\":{\"capabilities\":{\"positionEncoding\":\"utf-8\",\"textDocumentSync\":{\"openClose\":true,\"change\":1},\"definitionProvider\":true,\"typeDefinitionProvider\":true,\"referencesProvider\":true},\"serverInfo\":{\"name\":\"jlava\",\"version\":\"0.1\"}}},\"id\":2}";
+
+    try std.testing.expectEqualStrings(expected, payload.?);
+}
+
+test "handle - Initialized" {
+    const raw_initialized =
+        \\{"jsonrpc":"2.0","method":"initialized","id":3}
+    ;
+
+    const parsed_json = std.json.parseFromSlice(lsp_messages.LspRequest, std.testing.allocator, raw_initialized[0..raw_initialized.len], .{ .allocate = .alloc_always }) catch |err| return logger.throw("Could not parse request {!}", .{err}, UnrecoverableError.CouldNotParseRequest);
+
+    defer parsed_json.deinit();
+    const req = parsed_json.value;
+
+    const payload = handle(req) catch @panic("Could not parse parameters");
+    try std.testing.expect(payload == null);
 }

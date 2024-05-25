@@ -1,7 +1,6 @@
 const std = @import("std");
 
 pub const LspMethod = enum {
-
     //Lifecycle
     initialize,
     initialized,
@@ -16,7 +15,17 @@ pub const LspMethod = enum {
     // Language features
     @"textDocument/definition",
     @"textDocument/typeDefinition",
+    @"textDocument/references",
 };
+
+pub const ResponsePayload = union(enum) {
+    none: void,
+    err: ResponseError,
+    init_result: InitializeResult,
+    link: ?Location,
+    references: []Location,
+};
+
 pub const LspRequest = struct {
     jsonrpc: []const u8 = "2.0",
     id: u32 = undefined,
@@ -134,7 +143,7 @@ pub fn EnumCustomStringValues(comptime T: type, comptime contains_empty_enum: bo
             for (fields[0 .. fields.len - 1], 0..) |field, i| {
                 kvs_array[i] = .{ field.name, @field(T, field.name) };
             }
-            break :build_kvs kvs_array[0..];
+            break :build_kvs kvs_array;
         };
         /// NOTE: this maps 'empty' to .empty when T contains an empty enum
         /// this shouldn't happen but this doesn't do any harm

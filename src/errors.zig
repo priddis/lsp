@@ -17,6 +17,13 @@ pub const UnrecoverableError = jlava_error || error{
     NetNameDeleted,
 };
 
+pub const RecoverableError = error{
+    MethodNotFound,
+    ClassNotFound,
+    PackageNotFound,
+    ImportNotFound,
+};
+
 const jlava_error = error{
     CouldNotParseHeader,
     CouldNotParseRequest,
@@ -24,6 +31,7 @@ const jlava_error = error{
 };
 
 pub const IndexingError = error{
+    CouldNotOpenProject,
     NoPackageFound,
     NoClassFound,
 };

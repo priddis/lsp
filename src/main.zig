@@ -3,12 +3,13 @@ const logger = @import("log.zig");
 const request_handler = @import("request_handler.zig");
 const ts_helpers = @import("ts_helpers.zig");
 const core = @import("core.zig");
-const indexer = @import("indexer.zig");
+const collectors = @import("collectors.zig");
 
 pub fn main() void {
     core.init(std.heap.page_allocator);
     ts_helpers.init();
-    while (true) { request_handler.recv() catch |err| {
+    while (true) {
+        request_handler.recv() catch |err| {
             std.log.err("top level err {any}\n", .{err});
             return;
         };
@@ -18,6 +19,8 @@ pub fn main() void {
 // Logic for logging errors on panic
 pub fn panic(msg: []const u8, trace_opt: ?*std.builtin.StackTrace, addr: ?usize) noreturn {
     @setCold(true);
+    _ = collectors.TypeCollector.new(std.heap.page_allocator, "");
+
     if (trace_opt) |trace| {
         logger.log("\n{s} \n{any}\n", .{ msg, trace });
         const debug_info = std.debug.getSelfDebugInfo() catch {
@@ -41,10 +44,9 @@ pub fn panic(msg: []const u8, trace_opt: ?*std.builtin.StackTrace, addr: ?usize)
             unreachable;
         };
     }
-    std.os.abort();
+    std.process.exit(1);
 }
 
 test {
     std.testing.refAllDeclsRecursive(@This());
 }
-

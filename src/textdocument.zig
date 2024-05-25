@@ -1,31 +1,20 @@
 const lsp_messages = @import("lsp_messages.zig");
+const ResponsePayload = @import("lsp_messages.zig").ResponsePayload;
 const std = @import("std");
 const logger = @import("log.zig");
 const Buffer = @import("buffer.zig").Buffer;
-const indexer = @import("indexer.zig");
 const core = @import("core.zig");
 
-const parse_options = .{ .allocate = .alloc_always, .ignore_unknown_fields = true};
-
-//Handlers
-pub fn didOpen(allocator: std.mem.Allocator, req: lsp_messages.LspRequest) ?[]const u8 {
-    const params = std.json.parseFromValue(lsp_messages.DidOpenTextDocumentParams, allocator, req.params.?, parse_options) catch {
-        logger.log("Error parsing didOpen params {?}\n", .{req.params});
-        return null; //TODO, does the server need to respond to a parsing error?
-    };
-    const b = Buffer.open(allocator, params.value.textDocument.uri, params.value.textDocument.text) catch |err| {
+pub fn didOpen(allocator: std.mem.Allocator, params: lsp_messages.DidOpenTextDocumentParams) ResponsePayload {
+    const b = Buffer.open(allocator, params.textDocument.uri, params.textDocument.text) catch |err| {
         logger.log("Encountered {any} while opening\n", .{err});
-        return null;
+        return ResponsePayload{ .err = .{ .code = -1, .message = "Encountered an error while opening file\n" } };
     };
     core.buffers.append(b) catch @panic("Could not add to buffers");
-    return null;
+    return ResponsePayload{ .none = {} };
 }
 
-pub fn didChange(allocator: std.mem.Allocator, req: lsp_messages.LspRequest) ?[]const u8 {
-    const params = std.json.innerParseFromValue(lsp_messages.DidChangeTextDocumentParams, allocator, req.params.?, parse_options) catch {
-        logger.log("Error parsing didChange params {?}\n", .{req.params});
-        return null; //TODO, does the server need to respond to a parsing error?
-    };
+pub fn didChange(allocator: std.mem.Allocator, params: lsp_messages.DidChangeTextDocumentParams) ResponsePayload {
     for (params.contentChanges) |contentChanges| {
         switch (contentChanges) {
             .TextDocumentContentChangePartial => @panic("TODO:handle partial change"),
@@ -36,61 +25,71 @@ pub fn didChange(allocator: std.mem.Allocator, req: lsp_messages.LspRequest) ?[]
                     logger.log("Edit for non-open document. Opening...", .{});
                     const b = Buffer.open(allocator, params.textDocument.uri, change.text) catch |err| {
                         logger.log("Encountered {any} while opening\n", .{err});
-                        return null;
+                        return ResponsePayload{ .err = .{ .code = -1, .message = "Encountered an error while opening file\n" } };
                     };
                     core.buffers.append(b) catch @panic("Could not add to buffers");
                 }
-            }
+            },
         }
     }
-    return null;
+    return ResponsePayload{ .none = {} };
 }
 
-pub fn didClose(allocator: std.mem.Allocator, req: lsp_messages.LspRequest) ?[]const u8 {
-    const params = std.json.innerParseFromValue(lsp_messages.DidCloseTextDocumentParams, allocator, req.params.?, parse_options) catch {
-        logger.log("Error didClose parsing params {?}\n", .{req.params});
-        return null; //TODO, does the server need to respond to a parsing error?
-    };
+pub fn didClose(allocator: std.mem.Allocator, params: lsp_messages.DidCloseTextDocumentParams) ResponsePayload {
     if (core.findBuffer(params.textDocument.uri)) |buffer| {
         buffer.close(allocator);
     }
-    return null;
+    return ResponsePayload{ .none = {} };
 }
 
-pub fn definition(allocator: std.mem.Allocator, req: lsp_messages.LspRequest) ?[]const u8 {
-    const params = std.json.innerParseFromValue(lsp_messages.DefinitionParams, allocator, req.params.?, parse_options) catch {
-        logger.log("Error definition parsing params {?}\n", .{req.params});
-        return null; //TODO, does the server need to respond to a parsing error?
-    };
-
-    const location_opt = core.definition(params.textDocument.uri, params.position.line, params.position.character);
-    if (location_opt) |location| {
-        const res = lsp_messages.LspResponse(@TypeOf(location)).build(location, req.id);
-        return std.json.stringifyAlloc(allocator, res, .{ .emit_null_optional_fields = false }) catch { 
-            std.log.err("Error stringifying response {?}\n", .{res});
-            return null; 
-        };
-    } else {
-        //TODO: return method not found
-        return null;
-    }
+pub fn definition(params: lsp_messages.DefinitionParams) ResponsePayload {
+    const location = core.definition(params.textDocument.uri, params.position.line, params.position.character);
+    return ResponsePayload{ .link = location };
 }
 
-pub fn typeDefinition(allocator: std.mem.Allocator, req: lsp_messages.LspRequest) ?[]const u8 {
-    const params = std.json.innerParseFromValue(lsp_messages.TypeDefinitionParams, allocator, req.params.?, parse_options) catch {
-        logger.log("Error definition parsing params {?}\n", .{req.params});
-        return null; //TODO, does the server need to respond to a parsing error?
-    };
-
-    const location_opt = core.definition(params.textDocument.uri, params.position.line, params.position.character);
-    if (location_opt) |location| {
-        const res = lsp_messages.LspResponse(@TypeOf(location)).build(location, req.id);
-        return std.json.stringifyAlloc(allocator, res, .{ .emit_null_optional_fields = false }) catch { 
-            std.log.err("Error stringifying response {?}\n", .{res});
-            return null; 
-        };
-    } else {
-        //TODO: return method not found
-        return null;
+pub fn typeDefinition(params: lsp_messages.TypeDefinitionParams) ResponsePayload {
+    if (core.findBuffer(params.textDocument.uri)) |buf| {
+        const location = core.gotoTypeDefinition(buf, params.position.line, params.position.character);
+        return ResponsePayload{ .link = location };
     }
+    return ResponsePayload{ .none = {} };
+}
+
+//get node at point
+//search text for identifier
+//resolve type of each identifier in scope
+pub fn references(allocator: std.mem.Allocator, params: lsp_messages.ReferenceParams) ResponsePayload {
+    _ = params;
+    var buf = [_]u8{0} ** 500000;
+
+    var it = std.fs.openDirAbsolute("TODO, change dir", .{ .iterate = true, .access_sub_paths = true, .no_follow = true }) catch |err| switch (err) {
+        else => @panic("Could not open directory"),
+    };
+    defer it.close();
+
+    var walker = it.walk(allocator) catch |err| switch (err) {
+        error.OutOfMemory => @panic("OOM"),
+    };
+    while (walker.next() catch @panic("Cannot navigate dir")) |entry| {
+        if (entry.basename.len > 5) {
+            const filetype: []const u8 = entry.basename[entry.basename.len - 5 ..];
+            if (entry.kind == .file and std.mem.eql(u8, filetype, ".java")) {
+                const source_file: std.fs.File = entry.dir.openFile(entry.basename, .{}) catch |err| switch (err) {
+                    error.FileTooBig => continue,
+                    error.AccessDenied => continue,
+                    error.NoSpaceLeft => unreachable, //Indexing takes no disk space
+                    error.SymLinkLoop => unreachable,
+                    error.IsDir => unreachable,
+                    error.Unexpected => unreachable,
+                    else => unreachable,
+                };
+                defer source_file.close();
+                const length: u32 = @intCast(source_file.readAll(&buf) catch @panic("Cannot read file"));
+                const text = buf[0..length];
+                _ = text;
+                //std.mem.lastIndexOf(u8, text, name);
+            }
+        }
+    }
+    return ResponsePayload{ .references = &.{} };
 }
