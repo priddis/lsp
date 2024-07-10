@@ -1,7 +1,7 @@
 const std = @import("std");
-const index = @import("index.zig");
-const lsp_messages = @import("lsp_messages.zig");
-const ts_helpers = @import("ts_helpers.zig");
+const index = @import("Index.zig");
+const lsp_messages = @import("lsp/lsp_messages.zig");
+const ts_helpers = @import("ts/helpers.zig");
 const Logger = @import("log.zig");
 const errors = @import("errors.zig");
 
@@ -10,8 +10,8 @@ const Tables = @import("types.zig").Tables;
 const Position = @import("types.zig").Position;
 const RecoverableError = @import("errors.zig").RecoverableError;
 
-const Symbols = @import("ts_constants.zig").Symbols;
-const Fields = @import("ts_constants.zig").Fields;
+const Symbols = @import("ts/constants.zig").Symbols;
+const Fields = @import("ts/constants.zig").Fields;
 
 pub var buffers: std.ArrayList(Buffer) = undefined;
 const c = ts_helpers.c;
@@ -269,8 +269,8 @@ pub fn gotoTypeDefinition(self: *const Buffer, row: u32, col: u32) ?lsp_messages
     return null;
 }
 
-const array_list_code = @embedFile("testcode/ArrayListSmall.java");
-const array_list_code_edit = @embedFile("testcode/ArrayListSmall2.java");
+const array_list_code = @embedFile("../testcode/ArrayListSmall.java");
+const array_list_code_edit = @embedFile("../testcode/ArrayListSmall2.java");
 
 test "resolve type - parameter" {
     ts_helpers.init();

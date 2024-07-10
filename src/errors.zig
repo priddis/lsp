@@ -34,4 +34,4 @@ pub const IndexingError = error{
     CouldNotOpenProject,
     NoPackageFound,
     NoClassFound,
-};
+} || error{OutOfMemory};

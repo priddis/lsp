@@ -1,6 +1,6 @@
 const std = @import("std");
-const logger = @import("log.zig");
-const UnrecoverableError = @import("errors.zig").UnrecoverableError;
+const logger = @import("../log.zig");
+const UnrecoverableError = @import("../errors.zig").UnrecoverableError;
 const lsp_messages = @import("lsp_messages.zig");
 const lifecycle = @import("lifecycle.zig");
 const textdocument = @import("textdocument.zig");
@@ -14,7 +14,11 @@ pub fn recv() UnrecoverableError!void {
     const json_buf = try allocator.alloc(u8, length);
     try stdin.reader().readNoEof(json_buf);
 
-    const parsed_json = std.json.parseFromSlice(lsp_messages.LspRequest, allocator, json_buf[0..length], .{ .allocate = .alloc_always }) catch |err| return logger.throw("Could not parse request {!}", .{err}, UnrecoverableError.CouldNotParseRequest);
+    const parsed_json = std.json.parseFromSlice(lsp_messages.LspRequest, allocator, json_buf[0..length], .{ .allocate = .alloc_always }) catch |err| return logger.throw(
+        "Could not parse request {!}",
+        .{err},
+        UnrecoverableError.CouldNotParseRequest,
+    );
 
     defer parsed_json.deinit();
     const req = parsed_json.value;
@@ -25,10 +29,22 @@ pub fn recv() UnrecoverableError!void {
 
     if (payload) |res| {
         var buffer: [64]u8 = undefined;
-        const prefix = std.fmt.bufPrint(&buffer, "Content-Length: {d}\r\n\r\n", .{res.len}) catch return UnrecoverableError.CouldNotSendResponse;
+        const prefix = std.fmt.bufPrint(
+            &buffer,
+            "Content-Length: {d}\r\n\r\n",
+            .{res.len},
+        ) catch return UnrecoverableError.CouldNotSendResponse;
         logger.log("response - : {s}\n", .{res});
-        _ = stdout.write(prefix) catch |err| return logger.throw("Could not send response header {!}", .{err}, UnrecoverableError.CouldNotSendResponse);
-        _ = stdout.write(res) catch |err| return logger.throw("Could not send response {!}", .{err}, UnrecoverableError.CouldNotSendResponse);
+        _ = stdout.write(prefix) catch |err| return logger.throw(
+            "Could not send response header {!}",
+            .{err},
+            UnrecoverableError.CouldNotSendResponse,
+        );
+        _ = stdout.write(res) catch |err| return logger.throw(
+            "Could not send response {!}",
+            .{err},
+            UnrecoverableError.CouldNotSendResponse,
+        );
         allocator.free(res);
     }
 }
@@ -169,7 +185,7 @@ test "test parseHeader" {
 }
 
 test "handle - Initialize" {
-    const raw_initialize = try @import("testdata/initialize.zig").json();
+    const raw_initialize = try @import("../../testdata/initialize.zig").json();
 
     const parsed_json = std.json.parseFromSlice(lsp_messages.LspRequest, std.testing.allocator, raw_initialize[0..raw_initialize.len], .{ .allocate = .alloc_always }) catch |err| return logger.throw("Could not parse request {!}", .{err}, UnrecoverableError.CouldNotParseRequest);
 

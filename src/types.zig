@@ -1,35 +1,108 @@
 const std = @import("std");
-const Location = @import("lsp_messages.zig").Location;
-pub const Position = @import("lsp_messages.zig").Position;
+const Location = @import("lsp/lsp_messages.zig").Location;
+pub const Position = @import("lsp/lsp_messages.zig").Position;
+const Ast = @import("ts/helpers.zig").Ast;
+const StringTable = @import("StringTable.zig");
+const StringHandle = StringTable.StringHandle;
+const Namespace = @import("Namespace.zig");
 
 pub const ClassHandle = packed struct {
     generationId: u8,
     index: u32,
 };
 
-pub const AstClassInfo = struct { packageAndName: []const u8, imports: [][]const u8, methods: []AstMethodInfo, uriPosition: UriPosition, };
-pub const Class = struct {
-    packageAndName: []const u8,
-    imports: []ClassHandle,
+pub const Class = union(enum) {
+    primitive: Primitive,
+    ast_class: AstClassInfo,
+    typed_class: TypedClassInfo,
+    full_class: CompleteClassInfo,
+
+    pub fn getPackage(self: Class) StringHandle {
+        return switch (self) {
+            .primitive => StringTable.empty_string,
+            inline else => |klass| klass.package,
+        };
+    }
+
+    pub fn getName(self: Class) StringHandle {
+        return switch (self) {
+            .primitive => StringHandle{ .x = 100000 }, //TODO
+            inline else => |klass| klass.name,
+        };
+    }
+
+    pub fn getTree(self: Class) ?*Ast {
+        return switch (self) {
+            .primitive => null,
+            .full_class => null,
+            inline else => |klass| &klass.tree,
+        };
+    }
+
+    pub fn getPosition(self: Class) ?Position {
+        return switch (self) {
+            .primitive => null,
+            inline else => |klass| klass.position,
+        };
+    }
+};
+
+pub const Primitive = enum {
+    int,
+    byte,
+    short,
+    long,
+    float,
+    double,
+    boolean,
+    char,
+    void,
+    Object,
+};
+
+pub const AstClassInfo = struct {
+    imports: []StringHandle,
+    methods: []AstMethodInfo,
+    uri: []const u8,
+    position: Position,
+    tree: *Ast,
+    text: []const u8,
+};
+
+pub const TypedClassInfo = struct {
+    imports: std.AutoHashMap(StringHandle, Namespace.PackageOrClass),
     methods: []Method,
     //access: JavaAccess
     //static_fields: []Reference
     uri: []const u8,
     position: Position,
+    tree: *Ast,
+    text: []const u8,
+    usages: std.ArrayList(Position),
+};
+
+pub const CompleteClassInfo = struct {
+    imports: std.AutoHashMap(StringHandle, ClassHandle),
+    methods: []Method,
+    //access: JavaAccess
+    //static_fields: []Reference
+    uri: []const u8,
+    position: Position,
+    usages: std.ArrayList(Position),
 };
 
 pub const AstMethodInfo = struct {
-    name: []const u8,
+    name: StringHandle,
     //access: JavaAccess
-    returnType: []const u8,
+    return_type: StringHandle,
     position: Position,
 };
 
 pub const Method = struct {
-    name: []const u8,
+    name: StringHandle,
     //access: JavaAccess
-    returnType: ClassHandle,
-    position: Location,
+    return_type: ClassHandle,
+    position: Position,
 };
 
 pub const UriPosition = struct {

@@ -1,9 +1,9 @@
 const std = @import("std");
 const lsp_messages = @import("lsp_messages.zig");
-const ResponsePayload = @import("lsp_messages.zig").ResponsePayload;
+const ResponsePayload = lsp_messages.ResponsePayload;
 const server_capabilities = @import("server_capabilities.zig");
-const logger = @import("log.zig");
-const core = @import("core.zig");
+const logger = @import("../log.zig");
+const core = @import("../core.zig");
 
 const state = .{
     .ready1 = false,

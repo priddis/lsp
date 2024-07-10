@@ -1,11 +1,10 @@
 /// Manages open files
 const std = @import("std");
 const logger = @import("log.zig");
-const ts = @import("ts_constants.zig");
+const ts = @import("ts/constants.zig");
 const ts_fields = ts.Fields;
 const ts_symbols = ts.Symbols;
-const ts_helpers = @import("ts_helpers.zig");
-const collectors = @import("collectors.zig");
+const ts_helpers = @import("ts/helpers.zig");
 const UriPosition = @import("types.zig").UriPosition;
 const Position = @import("types.zig").Position;
 
@@ -63,8 +62,8 @@ pub const Buffer = struct {
 
 // Tests
 //
-const array_list_code = @embedFile("testcode/ArrayListSmall.java");
-const array_list_code2 = @embedFile("testcode/ArrayListSmall2.java");
+const array_list_code = @embedFile("../testcode/ArrayListSmall.java");
+const array_list_code2 = @embedFile("../testcode/ArrayListSmall2.java");
 
 test "openclose" {
     ts_helpers.init();

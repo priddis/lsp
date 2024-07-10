@@ -16,7 +16,8 @@ pub fn log(comptime msg: []const u8, args: anytype) void {
         std.fmt.format(f.writer(), msg, args) catch |er| {
             std.log.err("unable to write to file err.log {!}\n", .{er});
         };
-    } 
+    }
+    std.debug.print(msg, args);
     //std.log.defaultLog(.info, scope_level.default, msg, args);
 }
 

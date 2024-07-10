@@ -1,9 +1,9 @@
 const lsp_messages = @import("lsp_messages.zig");
 const ResponsePayload = @import("lsp_messages.zig").ResponsePayload;
 const std = @import("std");
-const logger = @import("log.zig");
-const Buffer = @import("buffer.zig").Buffer;
-const core = @import("core.zig");
+const logger = @import("../log.zig");
+const Buffer = @import("../buffer.zig").Buffer;
+const core = @import("../core.zig");
 
 pub fn didOpen(allocator: std.mem.Allocator, params: lsp_messages.DidOpenTextDocumentParams) ResponsePayload {
     const b = Buffer.open(allocator, params.textDocument.uri, params.textDocument.text) catch |err| {

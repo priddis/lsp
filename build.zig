@@ -10,7 +10,7 @@ pub fn build(b: *std.Build) void {
     // Precompilation step to generate treesitter constants
     const generate_consts = b.addExecutable(.{
         .name = "generate_ts_constants",
-        .root_source_file = .{ .path = "tools/generate_ts_constants.zig" },
+        .root_source_file = b.path("tools/generate_ts_constants.zig"),
         .target = b.host,
     });
     generate_consts.addObjectFile(b.path("lib/libtree-sitter.a"));
@@ -43,6 +43,9 @@ pub fn build(b: *std.Build) void {
     // standard location when the user invokes the "install" step (the default
     // step when running `zig build`).
     b.installArtifact(exe);
+    const run_exe = b.addRunArtifact(exe);
+    const run_step = b.step("run", "Run the language server");
+    run_step.dependOn(&run_exe.step);
 
     // Test step
     const filter = b.option([]const u8, "f", "Test filter");
@@ -63,4 +66,8 @@ pub fn build(b: *std.Build) void {
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
+
+    const exe_check = b.addExecutable(.{ .name = "lsp", .root_source_file = b.path("src/main.zig"), .target = target, .optimize = optimize });
+    const check = b.step("check", "Check if lsp compiles");
+    check.dependOn(&exe_check.step);
 }

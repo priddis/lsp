@@ -1,25 +1,27 @@
 const std = @import("std");
 const logger = @import("log.zig");
-const request_handler = @import("request_handler.zig");
-const ts_helpers = @import("ts_helpers.zig");
+const request_handler = @import("lsp/request_handler.zig");
+const ts_helpers = @import("ts/helpers.zig");
 const core = @import("core.zig");
-const collectors = @import("collectors.zig");
+const Index = @import("Index.zig");
 
-pub fn main() void {
-    core.init(std.heap.page_allocator);
+//TODO-remove error from main
+pub fn main() !void {
+    //core.init(std.heap.page_allocator);
     ts_helpers.init();
-    while (true) {
-        request_handler.recv() catch |err| {
-            std.log.err("top level err {any}\n", .{err});
-            return;
-        };
-    }
+    var clindx = try Index.init(std.heap.page_allocator);
+    try clindx.indexProject(std.heap.page_allocator, "src/test/jdk/");
+    //while (true) {
+    //    request_handler.recv() catch |err| {
+    //        std.log.err("top level err {any}\n", .{err});
+    //        return;
+    //    };
+    //}
 }
 
 // Logic for logging errors on panic
 pub fn panic(msg: []const u8, trace_opt: ?*std.builtin.StackTrace, addr: ?usize) noreturn {
     @setCold(true);
-    _ = collectors.TypeCollector.new(std.heap.page_allocator, "");
 
     if (trace_opt) |trace| {
         logger.log("\n{s} \n{any}\n", .{ msg, trace });
