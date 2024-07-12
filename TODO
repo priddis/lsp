@@ -1,14 +1,24 @@
-import *
+0.1 release
+-----------
+incremental updates
 arrays
 generics
 Method overloading
 static fields
 Constructors
-Superclasses
-Serialization
-Edit OpenBuffers
+Interfaces/Abstract classes
 multiple classes in one file
-memory optimization
+
+0.2 release
+-----------
+diagnostics
+Serialization
+Jar support
+code completions
+cmd line mode to find all refs to class, etc
+refactoring
+jdk versions
+
 
 Design
 
@@ -21,12 +31,4 @@ GoToDefinition (class) -> GoToTypeDefinition
 Find Usages (var) -> Find all usages of variable in scope
 Find Usages (method) -> Find all usages of method
 Find Usages (class) -> Find all usages of class
-
-
-classes -> 
-    indexed by:
-        package name + class name
-
-    contains:
-        methods
 

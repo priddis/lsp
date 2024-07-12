@@ -1,22 +1,39 @@
 const std = @import("std");
 const logger = @import("log.zig");
 const request_handler = @import("lsp/request_handler.zig");
+const StringTable = @import("StringTable.zig");
 const ts_helpers = @import("ts/helpers.zig");
 const core = @import("core.zig");
 const Index = @import("Index.zig");
+const Class = @import("types.zig").Class;
 
 //TODO-remove error from main
 pub fn main() !void {
     //core.init(std.heap.page_allocator);
     ts_helpers.init();
-    var clindx = try Index.init(std.heap.page_allocator);
-    try clindx.indexProject(std.heap.page_allocator, "src/test/jdk/");
+
+    var gpa = std.heap.GeneralPurposeAllocator(.{ .enable_memory_limit = true }){};
+    gpa.setRequestedMemoryLimit(1 * 1_000_000_000);
+    var arena = std.heap.ArenaAllocator.init(gpa.allocator());
+    defer arena.deinit();
+
+    try StringTable.init();
+    var clindx = try Index.init(arena.allocator());
+    try clindx.indexProject(gpa.allocator(), "src/test/elasticsearch/");
     //while (true) {
     //    request_handler.recv() catch |err| {
     //        std.log.err("top level err {any}\n", .{err});
     //        return;
     //    };
     //}
+    std.debug.print("Number of classes {d}\n", .{clindx.classes.items.len});
+    std.debug.print("Capacity of class array {d}\n", .{clindx.classes.capacity});
+    std.debug.print("Size of each class {d}\n", .{@sizeOf(Class)});
+    std.debug.print("bytes for class array {d}\n", .{clindx.classes.capacity * @sizeOf(Class)});
+    std.debug.print("Allocated bytes from arena {d}mb\n", .{arena.queryCapacity() / 1_000_000});
+    std.debug.print("gpa allocated bytes {d}mb\n", .{gpa.total_requested_bytes / 1_000_000});
+    std.debug.print("String table size {d}\n", .{StringTable.gpa.total_requested_bytes / 1_000_000});
+    //std.debug.print("Allocated bytes from gpa {d}mb\n", .{gpa.total_requested_bytes / 1000000});
 }
 
 // Logic for logging errors on panic

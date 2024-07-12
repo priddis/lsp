@@ -5,7 +5,7 @@ const c = @cImport({
     @cInclude("tree_sitter/api.h");
 });
 
-const TSFields = [_][:0]const u8 {
+const TSFields = [_][:0]const u8{
     "name",
     "declarator",
     "object",
@@ -15,7 +15,7 @@ const TSFields = [_][:0]const u8 {
     "declarator",
 };
 
-const TSSymbols = [_][:0]const u8 {
+const TSSymbols = [_][:0]const u8{
     "field_declaration",
     "local_variable_declaration",
     "method_invocation",
@@ -28,6 +28,7 @@ const TSSymbols = [_][:0]const u8 {
     "class_body",
     "type_identifier",
     "variable_declarator",
+    "array_type",
 };
 
 pub fn main() !void {
@@ -48,7 +49,7 @@ pub fn main() !void {
     for (TSFields) |field| {
         const id = c.ts_language_field_id_for_name(tree_sitter_java(), field, @truncate(field.len));
         std.debug.assert(id != 0);
-        try std.fmt.format(writer, "\tpub const {s}: u16 = {d};\n", .{field, id});
+        try std.fmt.format(writer, "\tpub const {s}: u16 = {d};\n", .{ field, id });
     }
     try writer.writeAll("};\n");
 
@@ -56,7 +57,7 @@ pub fn main() !void {
     for (TSSymbols) |symbol| {
         const id = c.ts_language_symbol_for_name(tree_sitter_java(), symbol, @truncate(symbol.len), true);
         std.debug.assert(id != 0);
-        try std.fmt.format(writer, "\tpub const {s}: u16 = {d};\n", .{symbol, id});
+        try std.fmt.format(writer, "\tpub const {s}: u16 = {d};\n", .{ symbol, id });
     }
     try writer.writeAll("};\n");
 }

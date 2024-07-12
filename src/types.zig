@@ -47,7 +47,7 @@ pub const Class = union(enum) {
     }
 };
 
-pub const Primitive = enum {
+pub const Primitive = enum(u4) {
     int,
     byte,
     short,
@@ -57,10 +57,20 @@ pub const Primitive = enum {
     boolean,
     char,
     void,
-    Object,
+    //Object,
+
+    pub fn fromStringHandle(handle: StringHandle) ?Primitive {
+        if (handle.x >= std.enums.values(Primitive).len) return null;
+        return @enumFromInt(handle.x);
+    }
+
+    pub fn toClassHandle(p: Primitive) ClassHandle {
+        return .{ .generationId = 0, .index = @intFromEnum(p) };
+    }
 };
 
 pub const AstClassInfo = struct {
+    package: StringHandle,
     imports: []StringHandle,
     methods: []AstMethodInfo,
     uri: []const u8,
@@ -70,7 +80,7 @@ pub const AstClassInfo = struct {
 };
 
 pub const TypedClassInfo = struct {
-    imports: std.AutoHashMap(StringHandle, Namespace.PackageOrClass),
+    imports: *std.AutoHashMap(StringHandle, Namespace.PackageOrClass),
     methods: []Method,
     //access: JavaAccess
     //static_fields: []Reference
@@ -82,7 +92,7 @@ pub const TypedClassInfo = struct {
 };
 
 pub const CompleteClassInfo = struct {
-    imports: std.AutoHashMap(StringHandle, ClassHandle),
+    imports: *std.AutoHashMap(StringHandle, ClassHandle),
     methods: []Method,
     //access: JavaAccess
     //static_fields: []Reference
@@ -128,3 +138,13 @@ pub const Tables = struct {
         return .{ .classes = ClassTable.init(alloc) };
     }
 };
+
+test "type sizes" {
+    inline for (&.{ AstClassInfo, TypedClassInfo, CompleteClassInfo }) |t| {
+        std.debug.print("Type {s}:\n", .{@typeName(t)});
+        inline for (std.meta.fields(t)) |f| {
+            std.debug.print("\tField {s} size {d} bytes:\n", .{ f.name, @sizeOf(f.type) });
+        }
+        std.debug.print("\n", .{});
+    }
+}
