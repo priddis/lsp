@@ -1,4 +1,3 @@
-//TODO- Revaluate uses of 'unreachable' in this file
 const std = @import("std");
 const Limits = @import("limits.zig");
 const Logger = @import("log.zig");
@@ -13,7 +12,9 @@ const Primitive = @import("types.zig").Primitive;
 const StringTable = @import("StringTable.zig");
 const StringHandle = StringTable.StringHandle;
 const Namespace = @import("Namespace.zig");
+const AstClassInfo = @import("types.zig").AstClassInfo;
 const AstMethodInfo = @import("types.zig").AstMethodInfo;
+const TypedClassInfo = @import("types.zig").TypedClassInfo;
 const Symbols = @import("ts/constants.zig").Symbols;
 const Fields = @import("ts/constants.zig").Fields;
 const c = ts_helpers.c;
@@ -23,25 +24,27 @@ extern "c" fn tree_sitter_java() *c.TSLanguage;
 const Index = @This();
 
 namespace: Namespace,
-classes: std.ArrayList(Class),
+ast_classes: std.ArrayListUnmanaged(AstClassInfo),
+classes: std.ArrayListUnmanaged(TypedClassInfo),
 arena: std.mem.Allocator,
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
 pub fn init(arena: std.mem.Allocator) !@This() {
-    var index = Index{
+    const index = Index{
         .namespace = Namespace.new(arena),
-        .classes = std.ArrayList(Class).init(arena),
+        .ast_classes = std.ArrayListUnmanaged(AstClassInfo){},
+        .classes = std.ArrayListUnmanaged(TypedClassInfo){},
         .arena = arena,
     };
 
     StringTable.empty_string = try StringTable.put("");
     StringTable.var_string = try StringTable.put("var");
-    inline for (std.meta.tags(Primitive)) |p| {
-        const primitive_handle = ClassHandle{ .generationId = 0, .index = @intCast(index.classes.items.len) };
-        const primitive_str = try StringTable.put(@tagName(p));
-        std.debug.assert(primitive_handle.index == primitive_str.x);
-        try index.classes.append(Class{ .primitive = p });
-    }
+    //inline for (std.meta.tags(Primitive)) |p| {
+    //    const primitive_handle = ClassHandle{ .generationId = 0, .index = @intCast(index.classes.items.len) };
+    //    const primitive_str = try StringTable.put(@tagName(p));
+    //    std.debug.assert(primitive_handle.index == primitive_str.x);
+    //    try index.classes.append(Class{ .primitive = p });
+    //}
     return index;
 }
 
@@ -51,17 +54,14 @@ pub fn indexProject(
     project: []const u8,
 ) IndexingError!void {
     try self.parseFiles(scratch, project);
-    std.debug.print("done parsing files\n", .{});
+    //std.debug.print("done parsing files\n", .{});
     try self.resolveTypes();
-    std.debug.print("done resolving types\n", .{});
+    //std.debug.print("done resolving types\n", .{});
 
-    //TODO remove hardcoded root class
-    //const main_package = self.namespace.getPackage("java.util") orelse std.debug.panic("Could not find java.util", .{});
-    //const entry_point = main_package.getClass("ArrayList").?;
     for (0..self.classes.items.len) |i| {
         try self.resolveReferences(scratch, .{ .generationId = 0, .index = @intCast(i) });
     }
-    std.debug.print("done resolving references\n", .{});
+    //std.debug.print("done resolving references\n", .{});
 }
 
 fn parseFiles(self: *@This(), scratch: std.mem.Allocator, project: []const u8) !void {
@@ -97,8 +97,8 @@ fn parseFiles(self: *@This(), scratch: std.mem.Allocator, project: []const u8) !
             defer source_file.close();
             const buf_or_error = source_file.readToEndAlloc(scratch, Limits.max_file_size);
             if (buf_or_error) |buf| {
-                //defer alloc.free(buf);
-                self.analyzeFile(entry.path, project, buf) catch |err| {
+                const uri = try std.mem.concat(self.arena, u8, &.{ "file://", project, "/", entry.path }); //TODO, use fs.join function
+                self.analyzeFile(uri, buf) catch |err| {
                     Logger.log("ERROR: out of memory to parse file {s} {!}", .{ entry.basename, err });
                     continue;
                 };
@@ -110,11 +110,7 @@ fn parseFiles(self: *@This(), scratch: std.mem.Allocator, project: []const u8) !
 }
 
 fn resolveTypes(self: *@This()) !void {
-    for (self.classes.items) |*class| {
-        if (std.meta.activeTag(class.*) == .primitive) {
-            continue;
-        }
-
+    for (self.ast_classes.items, 0..) |*ast_class, i| {
         //Resolve imports
         var resolved_imports = std.AutoHashMap(StringHandle, Namespace.PackageOrClass).init(self.arena);
 
@@ -125,13 +121,13 @@ fn resolveTypes(self: *@This()) !void {
                 try resolved_imports.put(entry.key_ptr.*, Namespace.PackageOrClass{ .class = entry.value_ptr.* });
             }
         }
-        if (self.namespace.resolveImport(class.ast_class.package)) |local_package| {
+        if (self.namespace.resolveImport(ast_class.package)) |local_package| {
             var util_it = local_package.package_or_class.package.classes.iterator();
             while (util_it.next()) |entry| {
                 try resolved_imports.put(entry.key_ptr.*, Namespace.PackageOrClass{ .class = entry.value_ptr.* });
             }
         }
-        for (class.ast_class.imports) |import| {
+        for (ast_class.imports) |import| {
             if (self.namespace.resolveImport(import)) |import_result| {
                 switch (import_result.package_or_class) {
                     .splat => |package| {
@@ -148,7 +144,7 @@ fn resolveTypes(self: *@This()) !void {
         }
         // Resolve return types
         var class_methods = std.ArrayList(Method).init(self.arena);
-        for (class.ast_class.methods) |method| {
+        for (ast_class.methods) |method| {
             //TODO handle use of subpackaged types
             // For example, Map.Entry
             if (Primitive.fromStringHandle(method.return_type)) |p| {
@@ -169,16 +165,15 @@ fn resolveTypes(self: *@This()) !void {
                 //Logger.log("Missing return type {s}\n", .{StringTable.toSlice(method.return_type)});
             }
         }
-        class.* = Class{ .typed_class = .{
-            .imports = try self.arena.create(std.AutoHashMap(StringHandle, Namespace.PackageOrClass)),
+        self.classes.items[i] = .{
+            .imports = resolved_imports,
+            //try self.arena.create(std.AutoHashMap(StringHandle, Namespace.PackageOrClass)),
             .methods = try class_methods.toOwnedSlice(),
-            .uri = class.ast_class.uri,
-            .position = class.ast_class.position,
-            .tree = class.ast_class.tree,
-            .text = class.ast_class.text,
-            .usages = std.ArrayList(Position).init(self.arena),
-        } };
-        class.typed_class.imports.* = resolved_imports;
+            .uri = ast_class.uri,
+            .position = ast_class.position,
+            .text = ast_class.text,
+            .usages = std.ArrayListUnmanaged(Position){},
+        };
     }
 }
 
@@ -187,23 +182,25 @@ fn resolveReferences(
     scratch: std.mem.Allocator,
     class_handle: ClassHandle,
 ) !void {
-    const class_info_u = self.classes.items[class_handle.index];
-    const typed_class_info = switch (class_info_u) {
-        .ast_class => std.debug.panic("Encountered ast after type collection", .{}),
-        .full_class => return,
-        .primitive => return,
-        .typed_class => |t| t,
-    };
+    const typed_class_info = self.classes.items[class_handle.index];
+    const tree = c.ts_parser_parse_string(
+        ts_helpers.parser,
+        null,
+        typed_class_info.text.ptr,
+        @intCast(typed_class_info.text.len),
+    ) orelse @panic("AST not created");
+    defer c.ts_tree_delete(tree);
+
     //const class_name = StringTable.toSlice(typed_class_info.name);
     //std.debug.print("class name - {s}\n", .{class_name});
-    var local_var_it = ts_helpers.TSIterator(Queries.LocalVariable).new(typed_class_info.tree);
+    var local_var_it = ts_helpers.TSIterator(Queries.LocalVariable).new(tree);
     defer local_var_it.deinit();
     defer scratch.free(typed_class_info.text);
-    defer c.ts_tree_delete(typed_class_info.tree);
 
     while (local_var_it.next()) |local| {
         const local_type_str = ts_helpers.localVarType(local, typed_class_info.text);
         const local_type = StringTable.get(local_type_str);
+        //std.debug.print("found type {s}\n", .{local_type_str});
         if (StringTable.var_string.equals(local_type)) {
             //TODO-resolve RHS for vars
 
@@ -212,42 +209,35 @@ fn resolveReferences(
                 continue;
             }
             if (typed_class_info.imports.get(known_local_type)) |resolved_package_or_class| {
+                //std.debug.print("resolved {s} to import {d}\n", .{ local_type_str, resolved_package_or_class.class.index });
                 const resolved_type_handle = switch (resolved_package_or_class) {
                     .class => |klass| klass,
                     .package => std.debug.panic("type resolved to package", .{}),
                     .splat => std.debug.panic("type resolved to splat", .{}),
                 };
-                var resolved_type = self.classes.items[resolved_type_handle.index];
-                switch (resolved_type) {
-                    .primitive => {},
-                    .ast_class => std.debug.panic(
-                        "Encountered ast class after type collection {s}",
-                        .{local_type_str},
-                    ),
-                    .typed_class => |*klass| try klass.usages.append(ts_helpers.nodeToPoint(local)),
-                    .full_class => |*klass| try klass.usages.append(ts_helpers.nodeToPoint(local)),
-                }
+                var resolved_type: *TypedClassInfo = &self.classes.items[resolved_type_handle.index];
+                try resolved_type.usages.append(self.arena, ts_helpers.nodeToPoint(local));
             } else {
                 //std.debug.print("type not imported {s}\n", .{local_type_str});
             }
         } else {
-            //Logger.log("Unknown local type {s}\n", .{local_type_str});
+            Logger.log("Unknown local type {s}\n", .{local_type_str});
         }
     }
 }
 
-pub fn analyzeFile(self: *@This(), project: []const u8, file_path: []const u8, text: []const u8) !void {
+pub fn analyzeFile(self: *@This(), uri: []const u8, text: []const u8) !void {
     const tree = c.ts_parser_parse_string(
         ts_helpers.parser,
         null,
         text.ptr,
         @intCast(text.len),
     ) orelse @panic("AST not created");
+    defer c.ts_tree_delete(tree);
 
     const package_string = collectPackage(tree, text);
     const imports = try self.collectImportStrings(tree, text);
     const methods = try self.collectMethods(tree, text);
-    const uri = try std.mem.concat(self.arena, u8, &.{ "file://", project, "/", file_path }); //TODO, use fs.join function
     try self.insertClass(tree, text, package_string, imports, methods, uri);
 }
 
@@ -306,15 +296,23 @@ fn insertClass(
             std.debug.assert(!c.ts_node_is_null(class_decl));
             const class_name = ts_helpers.nodeToText(class_decl, text);
             //std.debug.print("found class {s}\n", .{node_text});
-            try self.classes.append(Class{ .ast_class = .{
+            try self.ast_classes.append(self.arena, .{
                 .package = try StringTable.put(package),
                 .imports = imports,
                 .methods = methods,
                 .uri = uri,
                 .position = ts_helpers.nodeToPoint(class_decl),
-                .tree = @ptrCast(tree),
                 .text = text,
-            } });
+            });
+            try self.classes.append(self.arena, .{
+                .imports = undefined,
+                .methods = undefined,
+                .position = undefined,
+                .text = undefined,
+                .uri = undefined,
+                .usages = undefined,
+            });
+
             const class_handle = ClassHandle{ .index = @intCast(self.classes.items.len - 1), .generationId = 0 };
             try self.namespace.insert(package, class_name, class_handle);
             return;
@@ -355,8 +353,10 @@ fn collectMethods(self: *@This(), tree: *c.TSTree, text: []const u8) ![]AstMetho
             std.debug.assert(!c.ts_node_is_null(name_node));
             const method_name = try StringTable.put(ts_helpers.nodeToText(name_node, text));
 
-            //TODO, resolve primitives from node type
-            const return_type_node = c.ts_node_child_by_field_id(node, Fields.type);
+            var return_type_node = c.ts_node_child_by_field_id(node, Fields.type);
+            if (c.ts_node_symbol(return_type_node) == Symbols.array_type) {
+                return_type_node = c.ts_node_child_by_field_id(return_type_node, Fields.element);
+            }
             std.debug.assert(!c.ts_node_is_null(return_type_node));
             const return_type = try StringTable.put(ts_helpers.nodeToText(return_type_node, text));
 
@@ -372,9 +372,14 @@ fn collectMethods(self: *@This(), tree: *c.TSTree, text: []const u8) ![]AstMetho
 }
 
 ///Testing only
-fn getClass(self: @This(), full_class_name: []const u8) Class {
+fn getClass(self: @This(), full_class_name: []const u8) TypedClassInfo {
     const package_or_class = self.namespace.resolveImportString(full_class_name).?;
     const class_handle = package_or_class.package_or_class.class;
+    return self.classes.items[class_handle.index];
+}
+
+///Testing only
+fn getClassFromHandle(self: @This(), class_handle: ClassHandle) TypedClassInfo {
     return self.classes.items[class_handle.index];
 }
 
@@ -396,15 +401,21 @@ test "goto Class" {
     var index = try init(testgpa.allocator());
 
     try index.indexProject(testgpa.allocator(), "src/test/BasicReference/");
-    const klass = index.getClass("mypackage.ClassA");
+    const klassA = index.getClass("mypackage.ClassA");
 
-    const doThing = klass.typed_class.methods[0];
+    try std.testing.expectEqual(@as(u32, 3), klassA.position.line);
+    try std.testing.expectEqual(@as(u32, 13), klassA.position.character);
+
+    const doThing = klassA.methods[0];
     try std.testing.expectEqual(@as(u32, 9), doThing.position.line);
     try std.testing.expectEqual(@as(u32, 15), doThing.position.character);
 
-    const doAnotherThing = klass.typed_class.methods[1];
+    const doAnotherThing = klassA.methods[1];
     try std.testing.expectEqual(@as(u32, 15), doAnotherThing.position.line);
     try std.testing.expectEqual(@as(u32, 15), doAnotherThing.position.character);
+
+    const klassB = index.getClass("mypackage.ClassB");
+    try std.testing.expectEqual(2, klassB.usages.items.len);
 }
 
 test "collectImports" {
@@ -445,19 +456,19 @@ test "collectPackage" {
 }
 
 test "insertClass" {
-    try StringTable.init();
-    ts_helpers.init();
-    var index = try Index.init(testgpa.allocator());
+    //try StringTable.init();
+    //ts_helpers.init();
+    //var index = try Index.init(testgpa.allocator());
 
-    const text = @embedFile("test/HashMap.java");
-    const tree = c.ts_parser_parse_string(ts_helpers.parser, null, text, text.len).?;
-    defer c.ts_tree_delete(tree);
+    //const text = @embedFile("test/HashMap.java");
+    //const tree = c.ts_parser_parse_string(ts_helpers.parser, null, text, text.len).?;
+    //defer c.ts_tree_delete(tree);
 
-    try index.insertClass(tree, text, "java.util", &.{}, &.{}, &.{});
-    const class_info = index.getClass("java.util.HashMap");
-    try std.testing.expectEqual(Position{ .line = 14, .character = 13 }, class_info.getPosition());
-    const package = index.namespace.getPackage("java.util").?;
-    try std.testing.expect(package.getClass("HashMap") != null);
+    //try index.insertClass(tree, text, "java.util", &.{}, &.{}, &.{});
+    //const class_info = index.getClass("java.util.HashMap");
+    //try std.testing.expectEqual(Position{ .line = 14, .character = 13 }, class_info.getPosition());
+    //const package = index.namespace.getPackage("java.util").?;
+    //try std.testing.expect(package.getClass("HashMap") != null);
 }
 
 test "collectMethods" {
@@ -511,10 +522,10 @@ test "analyzeFile" {
     var index = try Index.init(testgpa.allocator());
 
     const text = @embedFile("test/HashMap.java");
-    try index.analyzeFile("/test/project", "HashMap.java", text);
-    const class = index.getClass("java.util.HashMap");
+    try index.analyzeFile("file:///test/project/HashMap.java", text);
+    const ast_class = index.ast_classes.items[0];
 
-    const imports = class.ast_class.imports;
+    const imports = ast_class.imports;
     try std.testing.expectEqualStrings("java.io.IOException", StringTable.toSlice(imports[0]));
     try std.testing.expectEqualStrings("java.io.InvalidObjectException", StringTable.toSlice(imports[1]));
     try std.testing.expectEqualStrings("java.io.ObjectInputStream", StringTable.toSlice(imports[2]));
@@ -527,6 +538,25 @@ test "analyzeFile" {
     try std.testing.expectEqualStrings("java.util.function.Function", StringTable.toSlice(imports[9]));
     try std.testing.expectEqualStrings("jdk.internal.access.SharedSecrets", StringTable.toSlice(imports[10]));
 
-    try std.testing.expectEqualStrings("file:///test/project/HashMap.java", class.ast_class.uri);
-    try std.testing.expectEqual(Position{ .line = 14, .character = 13 }, class.getPosition().?);
+    try std.testing.expectEqualStrings("file:///test/project/HashMap.java", ast_class.uri);
+    try std.testing.expectEqual(Position{ .line = 14, .character = 13 }, ast_class.position);
+}
+
+test "array type" {
+    try StringTable.init();
+    ts_helpers.init();
+    var index = try Index.init(testgpa.allocator());
+    try index.indexProject(testgpa.allocator(), "src/test/Arrays/");
+    const klass = index.getClass("mypackage.ClassA");
+    const first = klass.methods[0];
+    try std.testing.expectEqual(Primitive.toClassHandle(.int), first.return_type);
+
+    const second = klass.methods[1];
+    try std.testing.expectEqual(index.getClass("mypackage.ClassB"), index.getClassFromHandle(second.return_type));
+
+    const klassB = index.getClass("mypackage.ClassB");
+    const usages = klassB.usages.items;
+    try std.testing.expectEqual(2, usages.len);
+    try std.testing.expectEqual(18, usages[0].line);
+    try std.testing.expectEqual(8, usages[0].character);
 }

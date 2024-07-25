@@ -122,7 +122,10 @@ pub fn nodeToPoint(node: c.TSNode) Position {
 }
 
 pub fn localVarType(local: c.TSNode, text: []const u8) []const u8 {
-    const type_node = c.ts_node_child_by_field_id(local, Fields.type);
+    var type_node = c.ts_node_child_by_field_id(local, Fields.type);
+    if (c.ts_node_symbol(type_node) == Symbols.array_type) {
+        type_node = c.ts_node_child_by_field_id(type_node, Fields.element);
+    }
     return nodeToName(type_node, text);
 }
 

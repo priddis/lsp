@@ -1,11 +1,10 @@
 0.1 release
 -----------
-incremental updates
 arrays
 generics
+Constructors
 Method overloading
 static fields
-Constructors
 Interfaces/Abstract classes
 multiple classes in one file
 

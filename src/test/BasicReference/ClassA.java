@@ -8,7 +8,7 @@ public class ClassA {
     }
     
     public int doThing() {
-        var b = new ClassB();
+        ClassB b = new ClassB();
         b.doMoreThings();
         return b;
     }

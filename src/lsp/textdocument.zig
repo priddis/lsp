@@ -2,45 +2,6 @@ const lsp_messages = @import("lsp_messages.zig");
 const ResponsePayload = @import("lsp_messages.zig").ResponsePayload;
 const std = @import("std");
 const logger = @import("../log.zig");
-const Buffer = @import("../buffer.zig").Buffer;
-const core = @import("../core.zig");
-
-pub fn didOpen(allocator: std.mem.Allocator, params: lsp_messages.DidOpenTextDocumentParams) ResponsePayload {
-    const b = Buffer.open(allocator, params.textDocument.uri, params.textDocument.text) catch |err| {
-        logger.log("Encountered {any} while opening\n", .{err});
-        return ResponsePayload{ .err = .{ .code = -1, .message = "Encountered an error while opening file\n" } };
-    };
-    core.buffers.append(b) catch @panic("Could not add to buffers");
-    return ResponsePayload{ .none = {} };
-}
-
-pub fn didChange(allocator: std.mem.Allocator, params: lsp_messages.DidChangeTextDocumentParams) ResponsePayload {
-    for (params.contentChanges) |contentChanges| {
-        switch (contentChanges) {
-            .TextDocumentContentChangePartial => @panic("TODO:handle partial change"),
-            .TextDocumentContentChangeWholeDocument => |change| {
-                if (core.findBuffer(params.textDocument.uri)) |buffer| {
-                    buffer.edit(allocator, change.text);
-                } else {
-                    logger.log("Edit for non-open document. Opening...", .{});
-                    const b = Buffer.open(allocator, params.textDocument.uri, change.text) catch |err| {
-                        logger.log("Encountered {any} while opening\n", .{err});
-                        return ResponsePayload{ .err = .{ .code = -1, .message = "Encountered an error while opening file\n" } };
-                    };
-                    core.buffers.append(b) catch @panic("Could not add to buffers");
-                }
-            },
-        }
-    }
-    return ResponsePayload{ .none = {} };
-}
-
-pub fn didClose(allocator: std.mem.Allocator, params: lsp_messages.DidCloseTextDocumentParams) ResponsePayload {
-    if (core.findBuffer(params.textDocument.uri)) |buffer| {
-        buffer.close(allocator);
-    }
-    return ResponsePayload{ .none = {} };
-}
 
 pub fn definition(params: lsp_messages.DefinitionParams) ResponsePayload {
     const location = core.definition(params.textDocument.uri, params.position.line, params.position.character);

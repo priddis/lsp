@@ -6,25 +6,13 @@ const Logger = @import("log.zig");
 const errors = @import("errors.zig");
 
 const Buffer = @import("buffer.zig").Buffer;
-const Tables = @import("types.zig").Tables;
 const Position = @import("types.zig").Position;
 const RecoverableError = @import("errors.zig").RecoverableError;
 
 const Symbols = @import("ts/constants.zig").Symbols;
 const Fields = @import("ts/constants.zig").Fields;
 
-pub var buffers: std.ArrayList(Buffer) = undefined;
 const c = ts_helpers.c;
-
-pub fn init(alloc: std.mem.Allocator) void {
-    buffers = std.ArrayList(Buffer).init(alloc);
-}
-
-pub fn indexProject(alloc: std.mem.Allocator, project_path: []const u8) void {
-    std.debug.assert(std.fs.path.isAbsolute(project_path));
-    _ = alloc;
-    //tables = index.indexProject(alloc, project_path) catch @panic("Cannot index project");
-}
 
 pub fn dump() void {
     //const a = index.classes.keys();
@@ -42,20 +30,6 @@ pub fn findBuffer(uri: []const u8) ?*Buffer {
             return buf;
         }
     }
-    return null;
-}
-
-pub fn lookupMethod(method_name: []const u8) ?Position {
-    _ = method_name;
-    //for (buffers.items) |*buf| {
-    //    if (std.mem.eql(u8, class.name, buf.class_name)) {
-    //        return buf.methods.get(method_name) orelse return null;
-    //    }
-    //}
-
-    //std.debug.assert(tables.classes.count() > 0);
-    //const cl = tables.classes.get(class.fqdn) orelse return null;
-    //return cl.methods.get(method_name) orelse return null;
     return null;
 }
 
@@ -269,8 +243,8 @@ pub fn gotoTypeDefinition(self: *const Buffer, row: u32, col: u32) ?lsp_messages
     return null;
 }
 
-const array_list_code = @embedFile("../testcode/ArrayListSmall.java");
-const array_list_code_edit = @embedFile("../testcode/ArrayListSmall2.java");
+const array_list_code = @embedFile("test/ArrayListSmall.java");
+const array_list_code_edit = @embedFile("test/ArrayListSmall2.java");
 
 test "resolve type - parameter" {
     ts_helpers.init();
@@ -349,7 +323,7 @@ test "goto type declaration" {
     const arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer std.heap.ArenaAllocator.deinit(arena);
 
-    const expected_path = try std.fs.cwd().realpathAlloc(std.heap.page_allocator, "src/testcode");
+    const expected_path = try std.fs.cwd().realpathAlloc(std.heap.page_allocator, "src/test");
     _ = expected_path;
     //indexProject(arena.allocator(), expected_path);
     var doc = try Buffer.open(std.testing.allocator, "ArrayList.java", array_list_code);
@@ -360,47 +334,9 @@ test "goto type declaration" {
     try std.testing.expectEqual(@as(usize, 3), tables.classes.count());
     try std.testing.expect(t != null);
     var buf = [_]u8{0} ** 5000;
-    const filepath = try std.fs.cwd().realpath("src/testcode/HashMap.java", &buf);
+    const filepath = try std.fs.cwd().realpath("src/test/HashMap.java", &buf);
     const expected_file = try std.mem.concat(std.heap.page_allocator, u8, &.{ "file://", filepath });
     try std.testing.expectEqualStrings(expected_file, t.?.uri);
     try std.testing.expectEqual(@as(u32, 138), t.?.range.start.line);
     try std.testing.expectEqual(@as(u32, 13), t.?.range.start.character);
-}
-
-test "lookupMethod - new method in buffer" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer std.heap.ArenaAllocator.deinit(arena);
-
-    ts_helpers.init();
-    init(std.testing.allocator);
-    defer buffers.deinit();
-
-    const project_path = try std.fs.cwd().realpathAlloc(std.heap.page_allocator, "src/testcode");
-    indexProject(arena.allocator(), project_path);
-    var doc = try Buffer.open(std.testing.allocator, "ArrayListSmall.java", array_list_code_edit);
-    defer doc.close(std.testing.allocator);
-    try buffers.append(doc);
-    const res = lookupMethod("newTestMethod");
-    try std.testing.expect(res != null);
-    try std.testing.expectEqual(@as(u32, 52), res.?.line);
-    try std.testing.expectEqual(@as(u32, 16), res.?.character);
-}
-
-test "lookupMethod - indexedLookup" {
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    const aalloc = arena.allocator();
-    defer std.heap.ArenaAllocator.deinit(arena);
-
-    ts_helpers.init();
-    init(std.testing.allocator);
-    defer buffers.deinit();
-
-    const project_path = try std.fs.cwd().realpathAlloc(std.heap.page_allocator, "src/testcode");
-    indexProject(aalloc, project_path);
-    //dump();
-    const res = lookupMethod("trimToSize");
-    //const res = core.lookupMethod("clone", .{ .name = "HashMap", .fqdn = "java.util.HashMap" });
-    try std.testing.expect(res != null);
-    try std.testing.expectEqual(@as(u32, 200), res.?.line);
-    try std.testing.expectEqual(@as(u32, 16), res.?.character);
 }

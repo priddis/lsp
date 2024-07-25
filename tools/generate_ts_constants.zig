@@ -12,7 +12,7 @@ const TSFields = [_][:0]const u8{
     "parameters",
     "body",
     "type",
-    "declarator",
+    "element",
 };
 
 const TSSymbols = [_][:0]const u8{
@@ -49,7 +49,8 @@ pub fn main() !void {
     for (TSFields) |field| {
         const id = c.ts_language_field_id_for_name(tree_sitter_java(), field, @truncate(field.len));
         std.debug.assert(id != 0);
-        try std.fmt.format(writer, "\tpub const {s}: u16 = {d};\n", .{ field, id });
+        const f = if (std.mem.eql(u8, field, "type")) "@\"type\"" else field;
+        try std.fmt.format(writer, "    pub const {s}: u16 = {d};\n", .{ f, id });
     }
     try writer.writeAll("};\n");
 
@@ -57,7 +58,7 @@ pub fn main() !void {
     for (TSSymbols) |symbol| {
         const id = c.ts_language_symbol_for_name(tree_sitter_java(), symbol, @truncate(symbol.len), true);
         std.debug.assert(id != 0);
-        try std.fmt.format(writer, "\tpub const {s}: u16 = {d};\n", .{ symbol, id });
+        try std.fmt.format(writer, "    pub const {s}: u16 = {d};\n", .{ symbol, id });
     }
     try writer.writeAll("};\n");
 }

@@ -75,20 +75,18 @@ pub const AstClassInfo = struct {
     methods: []AstMethodInfo,
     uri: []const u8,
     position: Position,
-    tree: *Ast,
     text: []const u8,
 };
 
 pub const TypedClassInfo = struct {
-    imports: *std.AutoHashMap(StringHandle, Namespace.PackageOrClass),
+    imports: std.AutoHashMap(StringHandle, Namespace.PackageOrClass),
     methods: []Method,
     //access: JavaAccess
     //static_fields: []Reference
     uri: []const u8,
     position: Position,
-    tree: *Ast,
     text: []const u8,
-    usages: std.ArrayList(Position),
+    usages: std.ArrayListUnmanaged(Position),
 };
 
 pub const CompleteClassInfo = struct {
@@ -98,7 +96,7 @@ pub const CompleteClassInfo = struct {
     //static_fields: []Reference
     uri: []const u8,
     position: Position,
-    usages: std.ArrayList(Position),
+    usages: std.ArrayListUnmanaged(Position),
 };
 
 pub const AstMethodInfo = struct {
@@ -125,26 +123,12 @@ pub const Range = struct {
     end: usize = 0,
 };
 
-pub const ClassTable = std.StringArrayHashMap(struct {
-    position: Position,
-    methods: std.StringArrayHashMap(Position),
-    uri: []const u8,
-});
-
-pub const Tables = struct {
-    classes: ClassTable,
-
-    pub fn init(alloc: std.mem.Allocator) Tables {
-        return .{ .classes = ClassTable.init(alloc) };
-    }
-};
-
 test "type sizes" {
-    inline for (&.{ AstClassInfo, TypedClassInfo, CompleteClassInfo }) |t| {
-        std.debug.print("Type {s}:\n", .{@typeName(t)});
-        inline for (std.meta.fields(t)) |f| {
-            std.debug.print("\tField {s} size {d} bytes:\n", .{ f.name, @sizeOf(f.type) });
-        }
-        std.debug.print("\n", .{});
-    }
+    //inline for (&.{ AstClassInfo, TypedClassInfo, CompleteClassInfo }) |t| {
+    //    std.debug.print("Type {s}:\n", .{@typeName(t)});
+    //    inline for (std.meta.fields(t)) |f| {
+    //        std.debug.print("\tField {s} size {d} bytes:\n", .{ f.name, @sizeOf(f.type) });
+    //    }
+    //    std.debug.print("\n", .{});
+    //}
 }

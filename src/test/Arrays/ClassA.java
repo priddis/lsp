@@ -16,6 +16,7 @@ public class ClassA {
 
     public ClassB[] doAnotherThing(ClassB p) {
         p.doMoreThings();
+        ClassB b = new ClassB();
         ClassB[] d = { new ClassB()};
         return d;
     }

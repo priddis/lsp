@@ -5,6 +5,7 @@ pub const Fields = struct {
     pub const parameters: u16 = 25;
     pub const body: u16 = 4;
     pub const @"type": u16 = 36;
+    pub const element: u16 = 10;
 };
 pub const Symbols = struct {
     pub const field_declaration: u16 = 250;
@@ -18,4 +19,6 @@ pub const Symbols = struct {
     pub const method_declaration: u16 = 280;
     pub const class_body: u16 = 243;
     pub const type_identifier: u16 = 321;
+    pub const variable_declarator: u16 = 261;
+    pub const array_type: u16 = 269;
 };

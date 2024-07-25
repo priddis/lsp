@@ -19,10 +19,10 @@ pub fn build(b: *std.Build) void {
     generate_consts.linkLibC();
 
     const generate_consts_step = b.addRunArtifact(generate_consts);
-    const output = generate_consts_step.addOutputFileArg("ts_constants.zig");
+    const output = generate_consts_step.addOutputFileArg("ts/constants.zig");
 
-    const write_file = b.addWriteFiles();
-    write_file.addCopyFileToSource(output, "src/ts_constants.zig");
+    const write_file = b.addUpdateSourceFiles();
+    write_file.addCopyFileToSource(output, "src/ts/constants.zig");
     const generate = b.step("gen", "generate ts constants");
     generate.dependOn(&write_file.step);
 

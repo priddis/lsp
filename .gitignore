@@ -8,3 +8,5 @@ test_projects
 tree-sitter
 kcov
 kcov-out
+src/test/elaticsearch/
+src/test/jdk/

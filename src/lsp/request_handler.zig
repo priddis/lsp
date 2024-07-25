@@ -185,7 +185,7 @@ test "test parseHeader" {
 }
 
 test "handle - Initialize" {
-    const raw_initialize = try @import("../../testdata/initialize.zig").json();
+    const raw_initialize = try @import("../test/initialize.zig").json();
 
     const parsed_json = std.json.parseFromSlice(lsp_messages.LspRequest, std.testing.allocator, raw_initialize[0..raw_initialize.len], .{ .allocate = .alloc_always }) catch |err| return logger.throw("Could not parse request {!}", .{err}, UnrecoverableError.CouldNotParseRequest);
 
