@@ -1,7 +1,8 @@
 0.1 release
 -----------
-arrays
 generics
+abstract classes
+interfaces
 Constructors
 Method overloading
 static fields
@@ -10,10 +11,10 @@ multiple classes in one file
 
 0.2 release
 -----------
-diagnostics
-Serialization
 Jar support
 code completions
+diagnostics
+Serialization
 cmd line mode to find all refs to class, etc
 refactoring
 jdk versions
