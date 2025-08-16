@@ -4,13 +4,6 @@ const ResponsePayload = lsp_messages.ResponsePayload;
 const server_capabilities = @import("server_capabilities.zig");
 const logger = @import("../log.zig");
 
-const state = .{
-    .ready1 = false,
-    .ready2 = false,
-    .shutdown = false,
-    .exit = false,
-};
-
 const parse_options = .{ .allocate = .alloc_always, .ignore_unknown_fields = true };
 
 pub fn initialize(allocator: std.mem.Allocator, params: lsp_messages.InitializeParams) ResponsePayload {
@@ -20,7 +13,7 @@ pub fn initialize(allocator: std.mem.Allocator, params: lsp_messages.InitializeP
         const uri = std.Uri.parse(uri_string) catch return ResponsePayload{ .err = .{ .code = -2, .message = "Could not parse URI\n" } };
         std.debug.assert(uri.path.percent_encoded.len > 1);
         _ = allocator;
-        //core.indexProject(allocator, uri.path.percent_encoded);
+        //index.indexProject(allocator, uri.path.percent_encoded);
     }
 
     return ResponsePayload{ .init_result = init_result };

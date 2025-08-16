@@ -17,6 +17,7 @@ const AstMethodInfo = @import("types.zig").AstMethodInfo;
 const TypedClassInfo = @import("types.zig").TypedClassInfo;
 const Symbols = @import("ts/constants.zig").Symbols;
 const Fields = @import("ts/constants.zig").Fields;
+const Watch = @import("Watch.zig");
 const c = ts_helpers.c;
 
 extern "c" fn tree_sitter_java() *c.TSLanguage;
@@ -29,43 +30,30 @@ classes: std.ArrayListUnmanaged(TypedClassInfo),
 arena: std.mem.Allocator,
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
-pub fn init(arena: std.mem.Allocator) !@This() {
-    const index = Index{
+pub fn init(arena: std.mem.Allocator) @This() {
+    return Index{
         .namespace = Namespace.new(arena),
         .ast_classes = std.ArrayListUnmanaged(AstClassInfo){},
         .classes = std.ArrayListUnmanaged(TypedClassInfo){},
         .arena = arena,
     };
-
-    StringTable.empty_string = try StringTable.put("");
-    StringTable.var_string = try StringTable.put("var");
-    //inline for (std.meta.tags(Primitive)) |p| {
-    //    const primitive_handle = ClassHandle{ .generationId = 0, .index = @intCast(index.classes.items.len) };
-    //    const primitive_str = try StringTable.put(@tagName(p));
-    //    std.debug.assert(primitive_handle.index == primitive_str.x);
-    //    try index.classes.append(Class{ .primitive = p });
-    //}
-    return index;
 }
 
 pub fn indexProject(
     self: *@This(),
     scratch: std.mem.Allocator,
-    project: []const u8,
-) IndexingError!void {
+    project: [:0]const u8,
+) !void {
     try self.parseFiles(scratch, project);
-    //std.debug.print("done parsing files\n", .{});
     try self.resolveTypes();
-    //std.debug.print("done resolving types\n", .{});
 
     for (0..self.classes.items.len) |i| {
         try self.resolveReferences(scratch, .{ .generationId = 0, .index = @intCast(i) });
     }
-    //std.debug.print("done resolving references\n", .{});
 }
 
-fn parseFiles(self: *@This(), scratch: std.mem.Allocator, project: []const u8) !void {
-    var it = std.fs.cwd().openDir(project, .{
+fn parseFiles(self: *@This(), scratch: std.mem.Allocator, project: [:0]const u8) !void {
+    var project_dir = std.fs.cwd().openDir(project, .{
         .iterate = true,
         .access_sub_paths = true,
         .no_follow = true,
@@ -76,9 +64,10 @@ fn parseFiles(self: *@This(), scratch: std.mem.Allocator, project: []const u8) !
             IndexingError.CouldNotOpenProject,
         );
     };
-    defer it.close();
+    defer project_dir.close();
+    Watch.mark(project_dir.fd, null);
 
-    var walker = try it.walk(scratch);
+    var walker = try project_dir.walk(scratch);
     // Walk files
     while (walker.next() catch @panic("Error walking")) |entry| {
         if (entry.kind == .file and
@@ -105,6 +94,12 @@ fn parseFiles(self: *@This(), scratch: std.mem.Allocator, project: []const u8) !
             } else |err| {
                 Logger.log("ERROR: Could not open file {s} {!}", .{ entry.basename, err });
             }
+        }
+        if (entry.kind == .directory) {
+            const rlpath = try std.fs.path.relative(scratch, project, entry.path);
+            const rlpathz = try scratch.dupeZ(u8, rlpath);
+            std.debug.print("watching directory {s}\n", .{rlpathz});
+            Watch.mark(project_dir.fd, rlpathz);
         }
     }
 }
@@ -398,7 +393,7 @@ test "init" {
 test "goto Class" {
     try StringTable.init();
     ts_helpers.init();
-    var index = try init(testgpa.allocator());
+    var index = Index.init(testgpa.allocator());
 
     try index.indexProject(testgpa.allocator(), "src/test/BasicReference/");
     const klassA = index.getClass("mypackage.ClassA");
@@ -423,7 +418,7 @@ test "collectImports" {
 
     ts_helpers.init();
     try StringTable.init();
-    var index = try Index.init(testgpa.allocator());
+    var index = Index.init(testgpa.allocator());
 
     const tree = c.ts_parser_parse_string(ts_helpers.parser, null, text, text.len) orelse @panic("AST not created");
     defer c.ts_tree_delete(tree);
@@ -474,7 +469,7 @@ test "insertClass" {
 test "collectMethods" {
     try StringTable.init();
     ts_helpers.init();
-    var index = try Index.init(testgpa.allocator());
+    var index = Index.init(testgpa.allocator());
 
     const text = @embedFile("test/HashMap.java");
     const tree = c.ts_parser_parse_string(ts_helpers.parser, null, text, text.len).?;
@@ -519,7 +514,7 @@ test "collectMethods" {
 test "analyzeFile" {
     try StringTable.init();
     ts_helpers.init();
-    var index = try Index.init(testgpa.allocator());
+    var index = Index.init(testgpa.allocator());
 
     const text = @embedFile("test/HashMap.java");
     try index.analyzeFile("file:///test/project/HashMap.java", text);
@@ -545,7 +540,7 @@ test "analyzeFile" {
 test "array type" {
     try StringTable.init();
     ts_helpers.init();
-    var index = try Index.init(testgpa.allocator());
+    var index = Index.init(testgpa.allocator());
     try index.indexProject(testgpa.allocator(), "src/test/Arrays/");
     const klass = index.getClass("mypackage.ClassA");
     const first = klass.methods[0];

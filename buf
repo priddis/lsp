@@ -1,0 +1,13 @@
+
+fn fan_event_ok(len: u32, meta: fanotify.event_metadata) bool {
+    return len >= event_metadata_len and
+        meta.event_len >= event_metadata_len and
+        meta.event_len <= len;
+}
+
+fn fan_event_next(len: *u32, buf: []u8) fanotify.event_metadata {
+    const meta: [*]align(1) fanotify.event_metadata = @ptrCast(buf);
+    len.* -= meta.event_len;
+    const next_meta: [*]align(1) fanotify.event_metadata = @ptrCast(buf[meta[0].event_len..]);
+    return next_meta[0];
+}

@@ -31,7 +31,7 @@ pub fn main() !void {
             .ONDIR = true,
         },
         std.os.linux.AT.FDCWD,
-        "jdk",
+        "/home/micah/testc",
     );
     var buf: [4096]u8 = undefined;
     while (true) {
@@ -55,11 +55,18 @@ pub fn main() !void {
             std.debug.assert(meta[0].vers == fanotify.event_metadata.VERSION);
             if (meta[0].mask.Q_OVERFLOW) {
                 std.debug.print("file system watch queue overflowed\n", .{});
+                std.debug.panic("queue overflowed", {});
                 //TODO, reindex
             }
             const fid: *align(1) fanotify.event_info_fid = @ptrCast(meta + 1);
             switch (fid.hdr.info_type) {
                 .DFID_NAME => {
+                    const file_handle: *align(1) std.os.linux.file_handle = @ptrCast(&fid.handle);
+                    const file_name_z: [*:0]u8 = @ptrCast((&file_handle.f_handle).ptr + file_handle.handle_bytes);
+                    const file_name = std.mem.span(file_name_z);
+                    std.debug.print("dir {s}\n", .{file_name});
+                },
+                .FID_NAME => {
                     const file_handle: *align(1) std.os.linux.file_handle = @ptrCast(&fid.handle);
                     const file_name_z: [*:0]u8 = @ptrCast((&file_handle.f_handle).ptr + file_handle.handle_bytes);
                     const file_name = std.mem.span(file_name_z);

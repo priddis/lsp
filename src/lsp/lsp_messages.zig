@@ -1,23 +1,5 @@
 const std = @import("std");
 
-pub const LspMethod = enum {
-    //Lifecycle
-    initialize,
-    initialized,
-    shutdown,
-    exit,
-
-    //TextDocument
-    @"textDocument/didOpen",
-    @"textDocument/didChange",
-    @"textDocument/didClose",
-
-    // Language features
-    @"textDocument/definition",
-    @"textDocument/typeDefinition",
-    @"textDocument/references",
-};
-
 pub const ResponsePayload = union(enum) {
     none: void,
     err: ResponseError,
@@ -33,7 +15,7 @@ pub const LspRequest = struct {
     params: ?std.json.Value = undefined,
 };
 
-pub fn LspResponse(comptime T: type) type {
+pub fn LspResponse(T: type) type {
     return struct {
         jsonrpc: []const u8 = "2.0",
         result: T = undefined,

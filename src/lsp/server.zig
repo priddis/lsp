@@ -2,108 +2,63 @@ const std = @import("std");
 const logger = @import("../log.zig");
 const UnrecoverableError = @import("../errors.zig").UnrecoverableError;
 const lsp_messages = @import("lsp_messages.zig");
-const lifecycle = @import("lifecycle.zig");
-const textdocument = @import("textdocument.zig");
-var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-var allocator = gpa.allocator();
+const LspRequest = @import("lsp_messages.zig").LspRequest;
+const LspResponse = @import("lsp_messages.zig").LspResponse;
+const ResponsePayload = lsp_messages.ResponsePayload;
 
-pub fn recv() UnrecoverableError!void {
+pub fn receive(arena: std.mem.Allocator) !LspRequest {
     const stdin = std.io.getStdIn();
-    const length = try parseLspHeader(allocator, stdin.reader());
+    const length = try parseLspHeader(arena, stdin.reader());
 
-    const json_buf = try allocator.alloc(u8, length);
+    const json_buf = try arena.alloc(u8, length);
     try stdin.reader().readNoEof(json_buf);
 
-    const parsed_json = std.json.parseFromSlice(lsp_messages.LspRequest, allocator, json_buf[0..length], .{ .allocate = .alloc_always }) catch |err| return logger.throw(
-        "Could not parse request {!}",
-        .{err},
-        UnrecoverableError.CouldNotParseRequest,
+    const parsed_json = try std.json.parseFromSlice(
+        LspRequest,
+        arena,
+        json_buf[0..length],
+        .{
+            .allocate = .alloc_always,
+        },
     );
 
-    defer parsed_json.deinit();
-    const req = parsed_json.value;
-    logger.log("request - : {s}\n", .{json_buf[0..length]});
-
-    const stdout = std.io.getStdOut();
-    const payload = handle(req) catch @panic("Could not parse parameters");
-
-    if (payload) |res| {
-        var buffer: [64]u8 = undefined;
-        const prefix = std.fmt.bufPrint(
-            &buffer,
-            "Content-Length: {d}\r\n\r\n",
-            .{res.len},
-        ) catch return UnrecoverableError.CouldNotSendResponse;
-        logger.log("response - : {s}\n", .{res});
-        _ = stdout.write(prefix) catch |err| return logger.throw(
-            "Could not send response header {!}",
-            .{err},
-            UnrecoverableError.CouldNotSendResponse,
-        );
-        _ = stdout.write(res) catch |err| return logger.throw(
-            "Could not send response {!}",
-            .{err},
-            UnrecoverableError.CouldNotSendResponse,
-        );
-        allocator.free(res);
-    }
+    return parsed_json.value;
 }
 
-fn handle(req: lsp_messages.LspRequest) !?[]const u8 {
-    const lsp_method = std.meta.stringToEnum(lsp_messages.LspMethod, req.method) orelse {
-        logger.log("unrecognized method {s}\n", .{req.method});
+pub fn send(payload: []const u8) !void {
+    const stdout = std.io.getStdOut();
+    var buffer: [64]u8 = undefined;
+    const prefix = std.fmt.bufPrint(
+        &buffer,
+        "Content-Length: {d}\r\n\r\n",
+        .{payload.len},
+    ) catch return UnrecoverableError.CouldNotSendResponse;
+    _ = try stdout.write(prefix);
+    _ = try stdout.write(payload);
+}
+
+pub fn handle(arena: std.mem.Allocator, req: LspRequest) !?[]const u8 {
+    const lsp_method = std.meta.stringToEnum(LspMethod, req.method) orelse {
         return null;
     };
     logger.log("method = {s}\n", .{req.method});
-    const inner_result = switch (lsp_method) {
-        //lifecycle
-        .initialize => res: {
-            const parameters = try parseParameters(lsp_messages.InitializeParams, allocator, req);
-            break :res lifecycle.initialize(allocator, parameters);
-        },
-        .initialized => lifecycle.initialized(),
-        .shutdown => lifecycle.shutdown(),
-        .exit => lifecycle.exit(),
-        //textdocument
-        .@"textDocument/didOpen" => res: {
-            const parameters = try parseParameters(lsp_messages.DidOpenTextDocumentParams, allocator, req);
-            break :res textdocument.didOpen(allocator, parameters);
-        },
-        .@"textDocument/didChange" => res: {
-            const parameters = try parseParameters(lsp_messages.DidChangeTextDocumentParams, allocator, req);
-            break :res textdocument.didChange(allocator, parameters);
-        },
-        .@"textDocument/didClose" => res: {
-            const parameters = try parseParameters(lsp_messages.DidCloseTextDocumentParams, allocator, req);
-            break :res textdocument.didClose(allocator, parameters);
-        },
 
-        .@"textDocument/definition" => res: {
-            const parameters = try parseParameters(lsp_messages.DefinitionParams, allocator, req);
-            break :res textdocument.definition(parameters);
-        },
-        .@"textDocument/typeDefinition" => res: {
-            const parameters = try parseParameters(lsp_messages.TypeDefinitionParams, allocator, req);
-            break :res textdocument.typeDefinition(parameters);
-        },
-        .@"textDocument/references" => res: {
-            const parameters = try parseParameters(lsp_messages.ReferenceParams, allocator, req);
-            break :res textdocument.references(allocator, parameters);
-        },
+    const result = switch (lsp_method) {
+        .initialize => try initialize(arena, req),
+        .initialized => initialized(),
+        .exit => exit(),
+        .shutdown => shutdown(),
+
+        .@"textDocument/definition" => try definition(arena, req),
+        .@"textDocument/typeDefinition" => try typeDefinition(arena, req),
+        .@"textDocument/references" => try references(arena, req),
     };
-    if (inner_result == .none) {
-        return null;
-    }
-    const res = lsp_messages.LspResponse(@TypeOf(inner_result)).build(inner_result, req.id);
-    return std.json.stringifyAlloc(allocator, res, .{ .emit_null_optional_fields = false }) catch {
+
+    const res = LspResponse(@TypeOf(result)).build(result, req.id);
+    return std.json.stringifyAlloc(arena, res, .{ .emit_null_optional_fields = false }) catch {
         std.log.err("Error stringifying response {?}\n", .{res});
         return null;
     };
-}
-
-const parse_options = .{ .allocate = .alloc_always, .ignore_unknown_fields = true };
-fn parseParameters(comptime ParameterType: type, alloc: std.mem.Allocator, req: lsp_messages.LspRequest) !ParameterType {
-    return try std.json.innerParseFromValue(ParameterType, alloc, req.params.?, parse_options);
 }
 
 fn parseLspHeader(alloc: std.mem.Allocator, reader: anytype) UnrecoverableError!usize {
@@ -184,6 +139,8 @@ test "test parseHeader" {
     try expectError(UnrecoverableError.CouldNotParseHeader, parse_error);
 }
 
+var testgpa_a = std.heap.GeneralPurposeAllocator(.{ .enable_memory_limit = true }){};
+var testgpa = testgpa_a.allocator();
 test "handle - Initialize" {
     const raw_initialize = try @import("../test/initialize.zig").json();
 
@@ -192,7 +149,7 @@ test "handle - Initialize" {
     defer parsed_json.deinit();
     const req = parsed_json.value;
 
-    const payload = handle(req) catch @panic("Could not parse parameters");
+    const payload = handle(testgpa, req) catch @panic("Could not parse parameters");
     const expected = "{\"jsonrpc\":\"2.0\",\"result\":{\"init_result\":{\"capabilities\":{\"positionEncoding\":\"utf-8\",\"textDocumentSync\":{\"openClose\":true,\"change\":1},\"definitionProvider\":true,\"typeDefinitionProvider\":true,\"referencesProvider\":true},\"serverInfo\":{\"name\":\"jlava\",\"version\":\"0.1\"}}},\"id\":2}";
 
     try std.testing.expectEqualStrings(expected, payload.?);
@@ -208,6 +165,112 @@ test "handle - Initialized" {
     defer parsed_json.deinit();
     const req = parsed_json.value;
 
-    const payload = handle(req) catch @panic("Could not parse parameters");
+    const payload = handle(testgpa, req) catch @panic("Could not parse parameters");
     try std.testing.expect(payload == null);
+}
+
+const capabilities: lsp_messages.ServerCapabilities =
+    .{
+    .positionEncoding = .@"utf-8",
+    .textDocumentSync = .{ .TextDocumentSyncOptions = .{
+        .openClose = false,
+        .change = lsp_messages.TextDocumentSyncKind.None,
+    } },
+    .definitionProvider = .{ .bool = true },
+    .typeDefinitionProvider = .{ .bool = true },
+    .referencesProvider = .{ .bool = true },
+};
+
+const LspMethod = enum {
+    initialize,
+    initialized,
+    shutdown,
+    exit,
+
+    // Language features
+    @"textDocument/definition",
+    @"textDocument/typeDefinition",
+    @"textDocument/references",
+};
+
+// Lifecycle
+pub fn initialize(arena: std.mem.Allocator, req: lsp_messages.LspRequest) !ResponsePayload {
+    const params = try std.json.innerParseFromValue(
+        lsp_messages.InitializeParams,
+        arena,
+        req.params.?,
+        .{
+            .allocate = .alloc_always,
+            .ignore_unknown_fields = true,
+        },
+    );
+    const init_result: lsp_messages.InitializeResult = .{
+        .serverInfo = .{ .name = "jlava", .version = "0.1" },
+        .capabilities = capabilities,
+    };
+
+    if (params.rootUri) |uri_string| {
+        const uri = std.Uri.parse(uri_string) catch return ResponsePayload{ .err = .{ .code = -2, .message = "Could not parse URI\n" } };
+        std.debug.assert(uri.path.percent_encoded.len > 1);
+        //index.indexProject(allocator, uri.path.percent_encoded);
+    }
+
+    return ResponsePayload{ .init_result = init_result };
+}
+
+pub fn initialized() ResponsePayload {
+    return ResponsePayload{ .none = {} };
+}
+
+pub fn shutdown() ResponsePayload {
+    return ResponsePayload{ .none = {} };
+}
+
+pub fn exit() ResponsePayload {
+    logger.log("exit server\n", .{});
+    std.process.exit(0);
+    return ResponsePayload{ .none = {} };
+}
+
+//Text document
+
+pub fn definition(arena: std.mem.Allocator, req: lsp_messages.LspRequest) !ResponsePayload {
+    const params = try std.json.innerParseFromValue(
+        lsp_messages.DefinitionParams,
+        arena,
+        req.params.?,
+        .{
+            .allocate = .alloc_always,
+            .ignore_unknown_fields = true,
+        },
+    );
+    _ = params;
+    return ResponsePayload{ .link = undefined };
+}
+
+pub fn typeDefinition(arena: std.mem.Allocator, req: lsp_messages.LspRequest) !ResponsePayload {
+    const params = try std.json.innerParseFromValue(
+        lsp_messages.DefinitionParams,
+        arena,
+        req.params.?,
+        .{
+            .allocate = .alloc_always,
+            .ignore_unknown_fields = true,
+        },
+    );
+    _ = params;
+    return ResponsePayload{ .none = {} };
+}
+pub fn references(arena: std.mem.Allocator, req: lsp_messages.LspRequest) !ResponsePayload {
+    const params = try std.json.innerParseFromValue(
+        lsp_messages.ReferenceParams,
+        arena,
+        req.params.?,
+        .{
+            .allocate = .alloc_always,
+            .ignore_unknown_fields = true,
+        },
+    );
+    _ = params;
+    return ResponsePayload{ .references = &.{} };
 }
